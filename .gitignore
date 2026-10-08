@@ -1,0 +1,7 @@
+# Dados de clientes nunca vão para o GitHub
+private/
+*.xlsx
+*.pdf
+.env
+node_modules/
+__pycache__/

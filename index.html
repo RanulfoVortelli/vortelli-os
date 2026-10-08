@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vortelli OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+
+<!-- LOGIN -->
+<section id="login" class="login" hidden>
+  <form class="login-card" id="formLogin">
+    <div class="flag" aria-hidden="true"><i></i><i></i><i></i></div>
+    <h1>VORTELLI <span style="color:var(--gold)">OS</span></h1>
+    <p class="sub">Entre com o e-mail cadastrado na loja. Você recebe um link de acesso na hora.</p>
+    <label for="loginEmail">E-mail<input id="loginEmail" type="email" required autocomplete="email" placeholder="seu@email.com"></label>
+    <button class="btn gold" type="submit">Receber link de acesso</button>
+    <p class="note" id="loginMsg" role="status"></p>
+  </form>
+</section>
+
+<div class="app" id="app" hidden>
+<aside>
+  <div class="brand">
+    <div class="flag" aria-hidden="true"><i></i><i></i><i></i></div>
+    <b>VORTELLI<span> OS</span></b>
+    <small>Consórcio e Financiamento</small>
+  </div>
+  <nav id="nav" aria-label="Módulos">
+    <button data-view="painel" data-gestor>Painel</button>
+    <button data-view="cotas">Cotas</button>
+    <button data-view="comissoes">Comissões</button>
+    <button data-view="alertas">2ª parcela <span class="badge" id="badgeAlert">0</span></button>
+    <button data-view="financeiro" data-gestor>Financeiro</button>
+    <button data-view="equipes">Equipes</button>
+    <button data-view="regras">Regras</button>
+    <button data-view="manual">Manual</button>
+  </nav>
+  <div class="side-foot"><span id="quem"></span><br><button class="linkbtn" id="btnSair">Sair</button></div>
+</aside>
+
+<main>
+  <div class="demo" id="aviso" hidden></div>
+
+  <section data-page="painel" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Visão do CEO</span><h1 id="tituloMes">Mês atual</h1><p class="sub">Calculado a partir das cotas lançadas e das baixas de parcela.</p></div>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <div class="grid2" style="margin-top:16px">
+      <div class="panel">
+        <div class="panel-head"><h2>Comissão Disal a receber da carteira</h2><span class="sub">3ª, 4ª e 5ª parcelas ainda abertas</span></div>
+        <div id="chartCarteira"></div>
+        <p class="note">Dinheiro já vendido que entra nos próximos meses se os clientes continuarem pagando. Líquido de imposto.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Resultado do mês</h2><span class="sub">Até hoje</span></div>
+        <div class="list" id="dre"></div>
+      </div>
+    </div>
+    <div class="grid2" style="margin-top:16px">
+      <div class="panel"><div class="panel-head"><h2>Equipes no mês</h2><span class="sub">Cotas e crédito vendido</span></div><div class="list" id="rankEquipes"></div></div>
+      <div class="panel"><div class="panel-head"><h2>Precisa de atenção</h2></div><div class="list" id="atencao"></div></div>
+    </div>
+  </section>
+
+  <section data-page="cotas" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Vendas</span><h1>Cotas</h1><p class="sub">Uma linha por cota, lançada no dia da venda.</p></div>
+      <button class="btn gold" id="btnNova" data-pode-lancar>Lançar cota</button>
+    </div>
+    <form class="panel" id="formCota" hidden style="margin-bottom:16px">
+      <h2>Nova cota</h2>
+      <div class="formgrid">
+        <label for="fCliente">Cliente<input id="fCliente" required placeholder="Nome completo"></label>
+        <label for="fTel">Telefone<input id="fTel" inputmode="tel" placeholder="91 9 0000-0000"></label>
+        <label for="fCredito">Crédito (R$)<input id="fCredito" type="number" min="10000" step="1000" value="120000" required></label>
+        <label for="fParc">1ª parcela (R$)<input id="fParc" type="number" step="0.01" value="1413.66"></label>
+        <label for="fData">Data da venda<input id="fData" type="date" required></label>
+        <label for="fVenc">Vencimento da 1ª<input id="fVenc" type="date"></label>
+        <label for="fContrato">Contrato Disal<input id="fContrato" placeholder="7835535"></label>
+        <label for="fLogin">Login Disal<select id="fLogin"><option>Novo Mundo</option><option>Equipe Belém</option></select></label>
+        <label for="fVend">Vendedor<select id="fVend"></select></label>
+        <label for="fFech">Fechador<select id="fFech"></select></label>
+        <label for="fAdm">Administrativo<select id="fAdm"></select></label>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn gold" type="submit">Salvar cota</button><button class="btn ghost" type="button" id="btnCancelar">Cancelar</button></div>
+    </form>
+    <div class="toolbar" style="margin-bottom:12px">
+      <label for="qMes">Mês<select id="qMes"></select></label>
+      <label for="qEquipe">Equipe<select id="qEquipe"><option value="">Todas</option></select></label>
+      <label for="qBusca">Buscar<input id="qBusca" placeholder="Cliente, vendedor ou contrato"></label>
+    </div>
+    <div class="tbl-wrap"><table><thead><tr><th>Venda</th><th>Contrato</th><th>Cliente</th><th class="r">Crédito</th><th>Vendedor</th><th>Fechador</th><th>Adm</th><th>Parcelas 1–5</th><th>Situação</th></tr></thead><tbody id="tbCotas"></tbody></table></div>
+    <p class="note" style="margin-top:8px">Verde pago, amarelo vencida sem baixa, vermelho 2ª não paga, cinza em aberto, tracejado cancelado. Clique numa parcela para dar baixa.</p>
+  </section>
+
+  <section data-page="comissoes" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Pagamento toda sexta</span><h1>Comissões</h1><p class="sub">Vendas da semana entram na sexta seguinte. Estornos entram na semana em que a 2ª parcela é marcada como não paga.</p></div>
+      <label for="qSexta">Sexta de pagamento<select id="qSexta"></select></label>
+    </div>
+    <div class="kpis" id="kpisCom" style="margin-bottom:16px"></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Pessoa</th><th>Função</th><th>Equipe</th><th class="r">Cotas</th><th class="r">Comissão</th><th class="r">Estornos</th><th class="r">A pagar</th></tr></thead><tbody id="tbCom"></tbody></table></div>
+  </section>
+
+  <section data-page="alertas" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Pós-venda</span><h1>Clientes na 2ª parcela</h1><p class="sub">A 2ª parcela não gera comissão e, se não for paga, a Disal estorna 1% e a equipe perde 50%. Cada administrativo liga para a própria carteira.</p></div>
+    </div>
+    <div class="kpis" id="kpisAlert" style="margin-bottom:16px"></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Vencimento</th><th>Cliente</th><th>Telefone</th><th>Administrativo</th><th>Vendedor</th><th class="r">Parcela</th><th class="r">Em risco</th><th>Situação</th><th>Ações</th></tr></thead><tbody id="tbAlert"></tbody></table></div>
+  </section>
+
+  <section data-page="financeiro" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Caixa</span><h1>Entradas e saídas</h1><p class="sub">Lançamentos automáticos vêm das cotas. Despesas, tráfego pago e folha são lançados aqui.</p></div>
+    </div>
+    <div class="kpis" id="kpisFin" style="margin-bottom:16px"></div>
+    <form class="panel" id="formLanc" style="margin-bottom:16px">
+      <h2>Novo lançamento</h2>
+      <div class="formgrid">
+        <label for="lData">Data<input id="lData" type="date" required></label>
+        <label for="lTipo">Tipo<select id="lTipo"><option value="saida">Saída</option><option value="entrada">Entrada</option></select></label>
+        <label for="lCat">Categoria<select id="lCat"><option>Tráfego pago</option><option>Folha</option><option>Aluguel</option><option>Sistemas</option><option>Campanhas</option><option>Descontos veículos</option><option>Investimento</option><option>Outros</option></select></label>
+        <label for="lValor">Valor (R$)<input id="lValor" type="number" min="0" step="0.01" required placeholder="0,00"></label>
+      </div>
+      <label for="lDesc">Descrição<input id="lDesc" placeholder="Ex.: Meta Ads do dia"></label>
+      <div><button class="btn gold" type="submit">Lançar</button></div>
+    </form>
+    <div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Origem</th><th class="r">Valor</th></tr></thead><tbody id="tbFin"></tbody></table></div>
+  </section>
+
+  <section data-page="equipes" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Estrutura</span><h1>Equipes</h1><p class="sub" id="subEquipes"></p></div>
+    </div>
+    <div class="teams" id="teams"></div>
+  </section>
+
+  <section data-page="regras" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Configuração</span><h1>Regras de comissão</h1><p class="sub">Só o CEO e a gerência do administrativo alteram. Cada mudança é salva e recalcula o sistema inteiro.</p></div>
+    </div>
+    <div class="rules" id="rules"></div>
+  </section>
+
+  <section data-page="manual" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Processos</span><h1>Manual de cada função</h1><p class="sub">Quem entrar na loja lê aqui o que fazer.</p></div>
+    </div>
+    <div class="manual" id="manual"></div>
+  </section>
+</main>
+</div>
+</body>
+</html>

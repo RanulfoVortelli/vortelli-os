@@ -91,7 +91,8 @@ async function tudo(q) {
 }
 async function carregar(user) {
   try {
-    const { data: eu } = await sb.from('pessoas').select('*').eq('user_id', user.id).maybeSingle();
+    let { data: eu } = await sb.from('pessoas').select('*').eq('user_id', user.id).maybeSingle();
+    if (!eu) { await sb.rpc('vincular_meu_login'); ({ data: eu } = await sb.from('pessoas').select('*').eq('user_id', user.id).maybeSingle()); }
     if (!eu) { await sb.auth.signOut(); mostrarLogin(`O e-mail ${user.email} não está cadastrado no Vortelli OS. Peça ao administrativo para cadastrar.`); return; }
     ME = eu; GESTOR = ['ceo', 'gerente_adm'].includes(eu.funcao);
     const [eq, ps, rg, ct, lc, cn] = await Promise.all([
@@ -315,6 +316,31 @@ const MANUAL = [
 ];
 function renderManual() { $('manual').innerHTML = MANUAL.map(([t, l]) => `<div class="panel"><h2>${t}</h2><ol>${l.map(x => `<li>${x}</li>`).join('')}</ol></div>`).join(''); }
 
+function renderUsuarios() {
+  if (!GESTOR) return;
+  const sel = $('fuEquipe').value;
+  $('fuEquipe').innerHTML = '<option value="">Sem equipe</option>' + EQUIPES.map(e => `<option value="${e.id}">${esc(e.nome)}</option>`).join('');
+  $('fuEquipe').value = sel;
+  const lista = [...PESSOAS].sort((a, b) => (b.ativo - a.ativo) || a.nome.localeCompare(b.nome));
+  $('tbUsuarios').innerHTML = lista.map(p => {
+    const st = !p.ativo ? '<span class="chip c-canc">Inativo</span>' : p.user_id ? '<span class="chip c-pago">Acesso ativo</span>' : p.email ? '<span class="chip c-atrasado">Convite enviado</span>' : '<span class="chip c-aberto">Sem e-mail</span>';
+    const acao = p.ativo && !p.user_id ? `<button class="btn sm" data-convidar="${p.id}">${p.email ? 'Reenviar convite' : 'Salvar e convidar'}</button>` : '';
+    return `<tr><td>${esc(p.nome)}</td><td>${FUNCAO[p.funcao] || '—'}</td><td>${esc(equipeNome(p.equipe_id))}</td><td><input type="email" aria-label="E-mail de ${esc(p.nome)}" value="${esc(p.email || '')}" data-email-de="${p.id}" placeholder="email@exemplo.com" style="min-width:220px" ${p.user_id ? 'disabled' : ''}></td><td>${st}</td><td>${acao}</td></tr>`;
+  }).join('');
+}
+async function convidar(p, email) {
+  email = (email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Digite um e-mail válido');
+  if (p.email !== email) {
+    const { error } = await sb.from('pessoas').update({ email }).eq('id', p.id);
+    if (error) return toast(/duplicate|unique/i.test(error.message) ? 'Esse e-mail já está cadastrado para outra pessoa' : 'Não foi possível salvar: ' + error.message);
+    p.email = email;
+  }
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname + '?definir=1', shouldCreateUser: true } });
+  renderUsuarios();
+  if (error) return toast(/rate/i.test(error.message) ? 'Limite de e-mails por hora atingido. O e-mail foi salvo; reenvie o convite mais tarde.' : 'Não foi possível enviar: ' + error.message);
+  toast('Convite enviado para ' + email);
+}
 function initFiltros() {
   const yms = [...new Set(COTAS.map(c => ymOf(c.venda)).concat([ymNow]))].sort((a, b) => b - a);
   $('qMes').innerHTML = yms.map(ym => `<option value="${ym}">${ymLabel(ym)}</option>`).join('');
@@ -328,7 +354,7 @@ function initFiltros() {
   $('fAdm').innerHTML = '<option value="">Sem carteira</option>' + opt(ativos.filter(p => ['administrativo', 'gerente_adm'].includes(p.funcao)));
   $('fData').value = iso(TODAY); $('lData').value = iso(TODAY);
 }
-function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); }
+function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); renderUsuarios(); }
 function go(view) {
   document.querySelectorAll('[data-page]').forEach(s => s.hidden = s.dataset.page !== view);
   document.querySelectorAll('#nav button').forEach(b => { if (b.dataset.view === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
@@ -404,6 +430,24 @@ document.addEventListener('input', e => {
   R[k].valor = v; renderAll();
   clearTimeout(regraTimer);
   regraTimer = setTimeout(async () => { const { error } = await sb.from('regras').update({ valor: v, updated_at: new Date().toISOString() }).eq('chave', k); toast(error ? 'Não foi possível salvar a regra' : 'Regra salva'); }, 700);
+});
+
+$('formUsuario').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const nome = $('fuNome').value.trim(), email = $('fuEmail').value.trim().toLowerCase();
+  if (PESSOAS.some(p => (p.email || '').toLowerCase() === email)) return toast('Esse e-mail já está cadastrado');
+  let apelido = nome.split(/\s+/)[0].toUpperCase();
+  if (PESSOAS.some(p => p.apelido === apelido)) apelido = nome.toUpperCase().replace(/\s+/g, '_');
+  const { data, error } = await sb.from('pessoas').insert({ nome, apelido, funcao: $('fuFuncao').value, equipe_id: $('fuEquipe').value ? +$('fuEquipe').value : null, ativo: true }).select().single();
+  if (error) return toast('Não foi possível criar: ' + error.message);
+  PESSOAS.push(data); $('formUsuario').reset();
+  await convidar(data, email);
+});
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-convidar]'); if (!b) return;
+  const p = pessoaPorId(b.dataset.convidar);
+  const inp = document.querySelector(`[data-email-de="${p.id}"]`);
+  b.disabled = true; await convidar(p, inp ? inp.value : p.email); b.disabled = false;
 });
 
 iniciar();

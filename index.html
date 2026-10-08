@@ -51,6 +51,7 @@
     <button data-view="financeiro" data-gestor>Financeiro</button>
     <button data-view="equipes">Equipes</button>
     <button data-view="regras">Regras</button>
+    <button data-view="usuarios" data-gestor>Usuários</button>
     <button data-view="manual">Manual</button>
   </nav>
   <div class="side-foot"><span id="quem"></span><br><button class="linkbtn" id="btnSair">Sair</button></div>
@@ -160,6 +161,24 @@
       <div><span class="eyebrow">Configuração</span><h1>Regras de comissão</h1><p class="sub">Só o CEO e a gerência do administrativo alteram. Cada mudança é salva e recalcula o sistema inteiro.</p></div>
     </div>
     <div class="rules" id="rules"></div>
+  </section>
+
+  <section data-page="usuarios" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Acessos</span><h1>Usuários</h1><p class="sub">Cadastre a pessoa e o e-mail dela. O sistema envia um link e ela mesma cria a senha. Cada um vê só o que é da sua função.</p></div>
+    </div>
+    <form class="panel" id="formUsuario" style="margin-bottom:16px">
+      <h2>Novo usuário</h2>
+      <div class="formgrid">
+        <label for="fuNome">Nome<input id="fuNome" required placeholder="Nome e sobrenome"></label>
+        <label for="fuEmail">E-mail<input id="fuEmail" type="email" required placeholder="pessoa@email.com"></label>
+        <label for="fuFuncao">Função<select id="fuFuncao"><option value="vendedor">Vendedor</option><option value="gerente">Gerente</option><option value="administrativo">Administrativo</option><option value="gerente_adm">Gerente adm</option><option value="ceo">CEO</option></select></label>
+        <label for="fuEquipe">Equipe<select id="fuEquipe"></select></label>
+      </div>
+      <div><button class="btn gold" type="submit">Criar usuário e enviar convite</button></div>
+    </form>
+    <div class="tbl-wrap"><table><thead><tr><th>Pessoa</th><th>Função</th><th>Equipe</th><th>E-mail</th><th>Acesso</th><th></th></tr></thead><tbody id="tbUsuarios"></tbody></table></div>
+    <p class="note" style="margin-top:8px">O plano grátis do Supabase envia poucos e-mails por hora. Se aparecer "limite de e-mails", espere um pouco e clique em reenviar.</p>
   </section>
 
   <section data-page="manual" hidden>

@@ -19,10 +19,20 @@
   <form class="login-card" id="formLogin">
     <div class="flag" aria-hidden="true"><i></i><i></i><i></i></div>
     <h1>VORTELLI <span style="color:var(--gold)">OS</span></h1>
-    <p class="sub">Entre com o e-mail cadastrado na loja. Você recebe um link de acesso na hora.</p>
-    <label for="loginEmail">E-mail<input id="loginEmail" type="email" required autocomplete="email" placeholder="seu@email.com"></label>
-    <button class="btn gold" type="submit">Receber link de acesso</button>
+    <p class="sub">Entre com o seu e-mail e a sua senha.</p>
+    <label for="loginEmail">E-mail<input id="loginEmail" type="email" required autocomplete="username" placeholder="seu@email.com"></label>
+    <label for="loginSenha">Senha<input id="loginSenha" type="password" required minlength="6" autocomplete="current-password" placeholder="Sua senha"></label>
+    <button class="btn gold" type="submit" id="btnEntrar">Entrar</button>
+    <div class="login-links"><button type="button" class="linkbtn" id="btnPrimeiro">Primeiro acesso: criar minha senha</button><button type="button" class="linkbtn" id="btnEsqueci">Esqueci a senha</button></div>
     <p class="note" id="loginMsg" role="status"></p>
+  </form>
+  <form class="login-card" id="formNovaSenha" hidden>
+    <div class="flag" aria-hidden="true"><i></i><i></i><i></i></div>
+    <h1>Definir senha</h1>
+    <p class="sub">Escolha a senha que você vai usar para entrar no Vortelli OS. Mínimo de 8 caracteres.</p>
+    <label for="novaSenha">Nova senha<input id="novaSenha" type="password" required minlength="8" autocomplete="new-password"></label>
+    <button class="btn gold" type="submit">Salvar senha e entrar</button>
+    <p class="note" id="novaMsg" role="status"></p>
   </form>
 </section>
 

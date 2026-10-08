@@ -38,6 +38,7 @@ const FUNCAO = {ceo:'CEO', gerente:'Gerente', vendedor:'Vendedor', gerente_adm:'
 /* ---------------- Login ---------------- */
 async function iniciar() {
   const { data: { session } } = await sb.auth.getSession();
+  if (session && definirSenha) { mostrarNovaSenha(); return; }
   if (!session) { mostrarLogin(); return; }
   await carregar(session.user);
 }
@@ -47,13 +48,40 @@ function mostrarLogin(msg) {
 }
 $('formLogin').addEventListener('submit', async ev => {
   ev.preventDefault();
+  const email = $('loginEmail').value.trim(), senha = $('loginSenha').value;
+  $('loginMsg').textContent = 'Entrando…';
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: senha });
+  if (error) { $('loginMsg').textContent = /invalid/i.test(error.message) ? 'E-mail ou senha incorretos. No primeiro acesso, use "Primeiro acesso: criar minha senha".' : /confirm/i.test(error.message) ? 'Confirme o seu e-mail primeiro: abra a mensagem que enviamos e toque no link.' : 'Não foi possível entrar: ' + error.message; return; }
+  carregar(data.user);
+});
+const voltarAqui = location.origin + location.pathname;
+async function enviarLinkSenha(tipo) {
   const email = $('loginEmail').value.trim();
+  if (!email) { $('loginMsg').textContent = 'Digite o seu e-mail primeiro.'; $('loginEmail').focus(); return; }
   $('loginMsg').textContent = 'Enviando…';
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: true } });
-  $('loginMsg').textContent = error ? 'Não foi possível enviar o link: ' + error.message : 'Link enviado. Abra o seu e-mail neste aparelho e toque no link.';
+  const { error } = tipo === 'primeiro'
+    ? await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: voltarAqui + '?definir=1', shouldCreateUser: true } })
+    : await sb.auth.resetPasswordForEmail(email, { redirectTo: voltarAqui + '?definir=1' });
+  $('loginMsg').textContent = error ? 'Não foi possível enviar: ' + error.message : 'Enviamos um link para ' + email + '. Abra o e-mail neste aparelho e toque no link para criar a sua senha.';
+}
+$('btnPrimeiro').addEventListener('click', () => enviarLinkSenha('primeiro'));
+$('btnEsqueci').addEventListener('click', () => enviarLinkSenha('esqueci'));
+let definirSenha = new URLSearchParams(location.search).has('definir');
+function mostrarNovaSenha() { $('app').hidden = true; $('login').hidden = false; $('formLogin').hidden = true; $('formNovaSenha').hidden = false; $('novaSenha').focus(); }
+$('formNovaSenha').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  $('novaMsg').textContent = 'Salvando…';
+  const { data, error } = await sb.auth.updateUser({ password: $('novaSenha').value });
+  if (error) { $('novaMsg').textContent = 'Não foi possível salvar: ' + error.message; return; }
+  definirSenha = false; history.replaceState(null, '', voltarAqui);
+  $('formNovaSenha').hidden = true; $('formLogin').hidden = false;
+  carregar(data.user);
 });
 $('btnSair').addEventListener('click', async () => { await sb.auth.signOut(); location.reload(); });
-sb.auth.onAuthStateChange((evt, session) => { if (evt === 'SIGNED_IN' && session && !ME) carregar(session.user); });
+sb.auth.onAuthStateChange((evt, session) => {
+  if (evt === 'PASSWORD_RECOVERY' || (definirSenha && session)) { mostrarNovaSenha(); return; }
+  if (evt === 'SIGNED_IN' && session && !ME) carregar(session.user);
+});
 
 /* ---------------- Carga ---------------- */
 async function tudo(q) {

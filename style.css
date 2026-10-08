@@ -145,6 +145,7 @@ input:focus-visible,select:focus-visible,.btn:focus-visible{outline:2px solid va
 .login-card{width:100%;max-width:400px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:28px;display:flex;flex-direction:column;gap:16px}
 .login-card h1{font-size:28px;letter-spacing:.06em}
 .linkbtn{all:unset;cursor:pointer;color:var(--gold);font-weight:600;font-size:13px}
+.login-links{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px}
 .linkbtn:focus-visible{outline:2px solid var(--gold)}
 .pp button{all:unset;cursor:pointer}
 .pp button:focus-visible i{outline:2px solid var(--celeste);outline-offset:1px}

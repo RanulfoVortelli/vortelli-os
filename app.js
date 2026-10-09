@@ -18,6 +18,8 @@ const parseD = s => { if (!s) return null; const [y, m, d] = s.split('-').map(Nu
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const noMes = (d, ym) => d && ymOf(d) === ym;
 const sextaApos = d => { let x = addDays(d, 1); while (x.getDay() !== 5) x = addDays(x, 1); return x; };
+// Vendas de segunda a sábado entram no relatório da semana seguinte e são pagas na sexta dessa semana
+const sextaPagamento = d => addDays(addDays(d, -((d.getDay() + 6) % 7)), 11);
 function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
 
 if (!CFG.SUPABASE_URL || !CFG.SUPABASE_ANON_KEY) {
@@ -126,7 +128,7 @@ function montarCota(c, contatos) {
   for (let k = 1; k <= 5; k++) { if (!p[k]) p[k] = k === 1 ? 'pago' : 'aberto'; }
   return {
     id: c.id, contrato: c.contrato, cliente: c.cliente, telefone: c.telefone, credito: Number(c.credito || 0), parcela: Number(c.parcela_valor || 0),
-    venda: parseD(c.data_venda), venc, p, status: c.status, estornoDoc: c.estorno_documento,
+    venda: parseD(c.data_venda), venc, p, status: c.status, estornoDoc: c.estorno_documento, recuperacao: parseD(c.recuperacao_data), equipeId: c.equipe_id,
     vendedor_id: c.vendedor_id, fechador_id: c.fechador_id, adm_id: c.adm_id,
     vendedor: nomeP(c.vendedor_id), fechador: nomeP(c.fechador_id), adm: c.adm_id ? nomeP(c.adm_id) : 'Sem carteira',
     equipe: equipeNome(c.equipe_id || (pessoaPorId(c.vendedor_id) || {}).equipe_id), contato: contatos.has(c.id)
@@ -149,21 +151,73 @@ function eventosLoja(c) {
   if (c.p[2] === 'nao_pago') ev.push({ data: addDays(venc(c, 2), 5), tipo: 'disal', valor: -c.credito * r(c.estornoDoc ? 'estorno_doc' : 'estorno_disal') / 100 });
   return ev;
 }
+// Política de comissionamento (09/10/2026). Percentuais sobre o crédito na data da venda.
+const gerenteDaEquipe = eq => PESSOAS.find(p => p.equipe_id === eq && p.funcao === 'gerente' && p.ativo);
+const ehFechador = p => !!p && (p.funcao === 'gerente' || p.fechador);
+// Quem recebe na venda, conforme a situação
+function partesVenda(c) {
+  const pct = k => c.credito * r(k) / 100;
+  const pv = pessoaPorId(c.vendedor_id), pf = pessoaPorId(c.fechador_id);
+  const eqV = (pv && pv.equipe_id) || c.equipeId;
+  const ger = gerenteDaEquipe(eqV);
+  const partes = [];
+  if (!pf || (pv && pv.id === pf.id) || !pv) {
+    const quem = pv || pf; if (!quem) return { situacao: 0, partes };
+    if (ehFechador(quem)) {                                   // Situação 1: o fechador vende e fecha sozinho
+      partes.push({ pessoa: quem.id, papel: 'Fechador', valor: pct('fechador_pct') + r('fixo_fechador_sozinho') });
+      return { situacao: 1, partes };
+    }
+    partes.push({ pessoa: quem.id, papel: 'Vendedor', valor: pct('vendedor_fecha') });   // Situação 4: o vendedor fecha
+    if (ger && ger.id !== quem.id) partes.push({ pessoa: ger.id, papel: 'Gerente', valor: pct('gerente_vendedor_fecha_pct') + r('gerente_vendedor_fecha_fixo') });
+    return { situacao: 4, partes };
+  }
+  partes.push({ pessoa: pv.id, papel: 'Vendedor', valor: pct('vendedor') });
+  if (pf.funcao === 'gerente' && pf.equipe_id === eqV) {      // Situação 2: o gerente fecha venda da própria equipe
+    partes.push({ pessoa: pf.id, papel: 'Fechador', valor: pct('fechador_pct') + r('fixo_gerente_propria_equipe') });
+    return { situacao: 2, partes };
+  }
+  partes.push({ pessoa: pf.id, papel: 'Fechador', valor: pct('fechador_pct') + r('fixo_fechador_outra_equipe') });   // Situação 3
+  if (ger && ger.id !== pf.id) partes.push({ pessoa: ger.id, papel: 'Gerente', valor: r('gerente_fechador_outra_equipe') });
+  return { situacao: 3, partes };
+}
+// Desligamento: nada é pago nem estornado a partir da data de saída
+const ativoEm = (id, d) => { const p = pessoaPorId(id); return !(p && p.data_saida && d >= parseD(p.data_saida)); };
 function eventosEquipe(c) {
   if (!valida(c)) return [];
   const ev = [];
-  const cv = c.credito * r('vendedor') / 100, cf = r('fechador_fixo') + c.credito * r('fechador_pct') / 100, ca = c.credito * r('adm') / 100;
-  if (c.vendedor_id) ev.push({ pessoa: c.vendedor_id, data: c.venda, valor: cv, tipo: 'com', cota: c });
-  if (c.fechador_id) ev.push({ pessoa: c.fechador_id, data: c.venda, valor: cf, tipo: 'com', cota: c });
-  if (c.adm_id) ev.push({ pessoa: c.adm_id, data: c.venda, valor: ca, tipo: 'com', cota: c });
-  // Estorno da equipe: só quando a 2ª não foi paga e não é estorno por documento
+  const { partes } = partesVenda(c);
+  partes.forEach(x => ev.push({ pessoa: x.pessoa, papel: x.papel, data: c.venda, valor: x.valor, tipo: 'com', cota: c }));
+  // Estorno de 50% quando a 2ª não é paga (não vale para estorno por documento)
   if (c.p[2] === 'nao_pago' && !c.estornoDoc) {
     const d = addDays(venc(c, 2), 5), f = r('estorno_equipe') / 100;
-    if (c.vendedor_id) ev.push({ pessoa: c.vendedor_id, data: d, valor: -cv * f, tipo: 'est', cota: c });
-    if (c.fechador_id) ev.push({ pessoa: c.fechador_id, data: d, valor: -cf * f, tipo: 'est', cota: c });
+    const vendedorRecebeu = partes.some(x => x.papel === 'Vendedor');
+    partes.forEach(x => {
+      if (x.papel === 'Gerente' && !vendedorRecebeu) return;
+      ev.push({ pessoa: x.pessoa, papel: x.papel, data: d, valor: -x.valor * f, tipo: 'est', cota: c });
+      if (c.recuperacao) ev.push({ pessoa: x.pessoa, papel: x.papel, data: c.recuperacao, valor: x.valor * f, tipo: 'rec', cota: c });
+    });
   }
-  return ev;
+  // Administrativo e gerente administrativo: 0,05% por 3ª, 4ª e 5ª parcela paga
+  const gerAdm = PESSOAS.filter(p => p.funcao === 'gerente_adm' && p.ativo);
+  for (let k = 3; k <= 5; k++) {
+    if (c.p[k] !== 'pago') continue;
+    const d = venc(c, k);
+    if (c.adm_id) ev.push({ pessoa: c.adm_id, papel: 'Administrativo', data: d, valor: c.credito * r('adm_parcela') / 100, tipo: 'com', cota: c });
+    gerAdm.forEach(g => ev.push({ pessoa: g.id, papel: 'Gerente adm', data: d, valor: c.credito * r('gerente_adm_parcela') / 100, tipo: 'com', cota: c }));
+  }
+  return ev.filter(e => ativoEm(e.pessoa, e.data));
 }
+// Gerente geral: R$ 50 por cota se a loja vender no mínimo 80 no mês; apurado 7 dias após o fim do mês
+function bonusGerenteGeral() {
+  const gg = PESSOAS.find(p => p.gerente_geral && p.ativo); if (!gg) return [];
+  const porMes = {};
+  COTAS.forEach(c => { if (valida(c)) porMes[ymOf(c.venda)] = (porMes[ymOf(c.venda)] || 0) + 1; });
+  return Object.entries(porMes).filter(([, n]) => n >= r('gg_min_cotas')).map(([ym, n]) => {
+    ym = +ym; const fim = new Date(Math.floor(ym / 12), ym % 12 + 1, 0);
+    return { pessoa: gg.id, papel: 'Gerente geral', data: addDays(fim, 7), valor: n * r('gg_por_cota'), tipo: 'com', cota: { id: 'gg' + ym } };
+  }).filter(e => ativoEm(e.pessoa, e.data));
+}
+const todosEventosEquipe = () => COTAS.flatMap(eventosEquipe).concat(bonusGerenteGeral());
 function mesResumo(ym) {
   const vendas = COTAS.filter(c => valida(c) && noMes(c.venda, ym));
   let disal = 0, entrada = 0, equipe = 0;
@@ -171,6 +225,7 @@ function mesResumo(ym) {
     eventosLoja(c).forEach(e => { if (noMes(e.data, ym) && e.data <= TODAY && !e.previsto) { if (e.tipo === 'disal') disal += e.valor; else entrada += e.valor; } });
     eventosEquipe(c).forEach(e => { if (noMes(e.data, ym) && e.data <= TODAY) equipe += e.valor; });
   });
+  bonusGerenteGeral().forEach(e => { if (noMes(e.data, ym) && e.data <= TODAY) equipe += e.valor; });
   return { vendas, disal, entrada, imp: Math.max(0, disal) * r('imposto') / 100, equipe };
 }
 function despesasMes(ym) {
@@ -181,7 +236,7 @@ function alertasLista() {
   return COTAS.filter(c => valida(c) && c.p[2] === 'aberto' && venc(c, 2) <= lim && venc(c, 2) >= addDays(TODAY, -45))
               .sort((a, b) => venc(a, 2) - venc(b, 2));
 }
-const riscoCota = c => c.credito * r('estorno_disal') / 100 + (c.credito * r('vendedor') / 100 + r('fechador_fixo') + c.credito * r('fechador_pct') / 100) * r('estorno_equipe') / 100;
+const riscoCota = c => c.credito * r('estorno_disal') / 100 + partesVenda(c).partes.reduce((s, x) => s + x.valor, 0) * r('estorno_equipe') / 100;
 
 /* ---------------- Telas ---------------- */
 const ymNow = ymOf(TODAY);
@@ -216,7 +271,7 @@ function renderPainel() {
   $('rankEquipes').innerHTML = porEq.map((e, i) => `<div class="row"><div class="l"><span style="font-family:var(--f-num)">${i + 1}º</span>${esc(e.nome)} · ${esc(e.ger)}</div><b>${e.n} cotas · ${brl(e.cred)}</b></div>`).join('');
   const atras = al.filter(c => stView(c, 2) === 'atrasado').length;
   const prox = sextaApos(addDays(TODAY, -1));
-  const aPagar = COTAS.flatMap(eventosEquipe).filter(e => +sextaApos(e.data) === +prox).reduce((s, e) => s + e.valor, 0);
+  const aPagar = todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +prox).reduce((s, e) => s + e.valor, 0);
   const semCarteira = COTAS.filter(c => valida(c) && !c.adm_id && c.p[5] !== 'pago').length;
   const pend = Object.values(R).filter(x => x.pendente).length;
   $('atencao').innerHTML = [
@@ -247,9 +302,9 @@ function renderCotas() {
 
 function renderComissoes() {
   const sexta = new Date(+$('qSexta').value);
-  const ev = COTAS.flatMap(eventosEquipe).filter(e => +sextaApos(e.data) === +sexta && (GESTOR || e.pessoa === ME.id || (ME.funcao === 'gerente')));
+  const ev = todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +sexta && (GESTOR || e.pessoa === ME.id || (ME.funcao === 'gerente')));
   const map = {};
-  ev.forEach(e => { const m = map[e.pessoa] ||= { id: e.pessoa, cotas: new Set(), com: 0, est: 0 }; if (e.tipo === 'com') { m.com += e.valor; m.cotas.add(e.cota.id); } else m.est += e.valor; });
+  ev.forEach(e => { const m = map[e.pessoa] ||= { id: e.pessoa, cotas: new Set(), com: 0, est: 0 }; if (e.tipo === 'com' || e.tipo === 'rec') { m.com += e.valor; if (e.tipo === 'com') m.cotas.add(e.cota.id); } else m.est += e.valor; });
   const lista = Object.values(map).sort((a, b) => (b.com + b.est) - (a.com + a.est));
   const tc = lista.reduce((s, x) => s + x.com, 0), te = lista.reduce((s, x) => s + x.est, 0);
   $('kpisCom').innerHTML = kpi('Comissões', brl(tc)) + kpi('Estornos', `<span class="neg">${brl(te)}</span>`) + kpi('Total a pagar', brl(tc + te)) + kpi('Pessoas', lista.length);
@@ -303,13 +358,13 @@ function renderEquipes() {
     <div class="list">${ativos.filter(p => ['administrativo', 'gerente_adm'].includes(p.funcao)).map(p => `<div class="row"><div class="l">${esc(p.nome)}<span>${FUNCAO[p.funcao]}</span></div><b>${COTAS.filter(c => valida(c) && c.adm_id === p.id && c.p[5] !== 'pago' && c.p[2] !== 'nao_pago').length} clientes</b></div>`).join('')}</div></article>`;
 }
 
-const GRUPOS = [['Disal e loja', ['entrada', 'disal_venda', 'disal_p345', 'estorno_disal', 'estorno_doc', 'recuperacao', 'imposto']], ['Equipe', ['vendedor', 'fechador_pct', 'fechador_fixo', 'adm', 'estorno_equipe', 'meta_cotas']]];
+const GRUPOS = [['Disal e loja', ['entrada', 'disal_venda', 'disal_p345', 'estorno_disal', 'estorno_doc', 'recuperacao', 'imposto', 'meta_cotas']], ['Venda (por situação)', ['vendedor', 'vendedor_fecha', 'fechador_pct', 'fixo_fechador_sozinho', 'fixo_gerente_propria_equipe', 'fixo_fechador_outra_equipe', 'gerente_fechador_outra_equipe', 'gerente_vendedor_fecha_pct', 'gerente_vendedor_fecha_fixo']], ['Parcelas, estorno e bônus', ['adm_parcela', 'gerente_adm_parcela', 'estorno_equipe', 'gg_min_cotas', 'gg_por_cota']]];
 function renderRegras() {
   $('rules').innerHTML = GRUPOS.map(([t, ks]) => `<div class="panel"><h2>${t}</h2><div>${ks.filter(k => R[k]).map(k => `<div class="rule"><div class="t"><label for="r_${k}" style="color:var(--ink);font-size:14px">${esc(R[k].descricao)}</label>${R[k].pendente ? '<span class="pend">Pendente de confirmação</span>' : ''}</div><input id="r_${k}" type="number" step="any" value="${R[k].valor}" data-rule="${k}" ${GESTOR ? '' : 'disabled'}></div>`).join('')}</div></div>`).join('');
 }
 
 const MANUAL = [
-  ['Vendedor', ['Atender o lead no mesmo dia em que ele chega.', 'Apresentar a carta e a entrada de R$ 3.600.', 'Passar o cliente para o fechador da equipe.', 'Conferir se a cota foi lançada no sistema no dia da venda.', 'Acompanhar com o administrativo até a 2ª parcela: se ela não for paga, você perde 50% da comissão.']],
+  ['Vendedor', ['Atender o lead no mesmo dia em que ele chega.', 'Apresentar a carta e a entrada de R$ 3.600.', 'Passar o cliente para o fechador, ou fechar você mesmo (aí a comissão sobe de 0,4% para 0,5%).', 'Conferir se a cota foi lançada no sistema no dia da venda: venda fora do relatório da Disal não gera comissão.', 'Acompanhar com o administrativo até a 2ª parcela: se ela não for paga, você devolve 50% da comissão.']],
   ['Fechador / Gerente', ['Fechar o contrato e conferir a documentação antes de enviar à Disal.', 'Lançar a cota no sistema com vendedor, fechador, administrativo e login.', 'Acompanhar a meta da equipe no painel todos os dias.', 'Cobrar da equipe os clientes da 2ª parcela que estão no radar.']],
   ['Administrativo', ['Enviar a mensagem de boas-vindas no dia da venda.', 'Ligar para todo cliente da sua carteira antes do vencimento da 2ª parcela.', 'Marcar "Contato feito" na tela da 2ª parcela.', 'Dar baixa nas parcelas: "Pagou" ou "Não pagou".', 'Acompanhar o cliente até a 5ª parcela e registrar recuperações.']],
   ['Gerente do administrativo', ['Toda semana, baixar o borderô da Disal dos dois logins e conferir com o sistema.', 'Marcar os estornos por documento, que não são cobrados do consultor.', 'Na quinta, conferir o pagamento da sexta e liberar.', 'Lançar despesas, tráfego pago e folha no Financeiro.']]
@@ -345,8 +400,8 @@ function initFiltros() {
   const yms = [...new Set(COTAS.map(c => ymOf(c.venda)).concat([ymNow]))].sort((a, b) => b - a);
   $('qMes').innerHTML = yms.map(ym => `<option value="${ym}">${ymLabel(ym)}</option>`).join('');
   $('qEquipe').innerHTML = '<option value="">Todas</option>' + EQUIPES.filter(e => e.nome !== 'Administrativo').map(e => `<option>${esc(e.nome)}</option>`).join('');
-  const sextas = []; let s = sextaApos(addDays(TODAY, -1)); for (let i = 0; i < 9; i++) { sextas.push(s); s = addDays(s, -7); }
-  $('qSexta').innerHTML = sextas.map((d, i) => `<option value="${+d}">${d.toLocaleDateString('pt-BR')}${i === 0 ? ' (próxima)' : ''}</option>`).join('');
+  const sextas = []; let s = addDays(sextaApos(addDays(TODAY, -1)), 7); for (let i = 0; i < 10; i++) { sextas.push(s); s = addDays(s, -7); }
+  $('qSexta').innerHTML = sextas.map((d, i) => `<option value="${+d}">${d.toLocaleDateString('pt-BR')}${+d === +sextaApos(addDays(TODAY, -1)) ? ' (esta semana)' : i === 0 ? ' (previsão)' : ''}</option>`).join('');
   const ativos = PESSOAS.filter(p => p.ativo);
   const opt = l => l.map(p => `<option value="${p.id}">${esc(p.nome)}</option>`).join('');
   $('fVend').innerHTML = opt(ativos.filter(p => ['vendedor', 'gerente'].includes(p.funcao)));

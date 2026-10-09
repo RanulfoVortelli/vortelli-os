@@ -32,10 +32,16 @@ const sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY)
 let ME = null, GESTOR = false;
 let EQUIPES = [], PESSOAS = [], R = {}, COTAS = [], LANC = [];
 const r = k => (R[k] ? Number(R[k].valor) : 0);
+const funcaoNome = p => p && p.gerente_geral ? 'Gerente geral' : (FUNCAO[p && p.funcao] || '—');
+const salarioDe = p => !p.ativo ? 0 : p.salario != null ? Number(p.salario) : (p.funcao === 'administrativo' ? r('salario_minimo') : 0);
+const diasFolha = () => [r('folha_dia_1') || 3, r('folha_dia_2') || 17];
+const folhaTotal = () => PESSOAS.reduce((s, p) => s + salarioDe(p), 0);
+const folhaMes = ym => folhaTotal();
+const proxFolha = () => { const y = TODAY.getFullYear(), m = TODAY.getMonth(); return [0, 1].flatMap(i => diasFolha().map(d => new Date(y, m + i, d))).find(d => d >= TODAY); };
 const pessoaPorId = id => PESSOAS.find(p => p.id === id);
 const nomeP = id => (pessoaPorId(id) || {}).nome || '—';
 const equipeNome = id => (EQUIPES.find(e => e.id === id) || {}).nome || '—';
-const FUNCAO = {ceo:'CEO', gerente:'Gerente', vendedor:'Vendedor', gerente_adm:'Gerente adm', administrativo:'Administrativo'};
+const FUNCAO = {ceo:'CEO', gerente:'Supervisor', vendedor:'Vendedor', gerente_adm:'Gerente adm', administrativo:'Administrativo'};
 
 /* ---------------- Login ---------------- */
 async function iniciar() {
@@ -111,7 +117,7 @@ async function carregar(user) {
     COTAS = ct.map(c => montarCota(c, contatos));
     LANC = (lc.data || []).map(l => ({ ...l, data: parseD(l.data), valor: Number(l.valor) }));
     $('login').hidden = true; $('app').hidden = false;
-    $('quem').textContent = `${ME.nome} · ${FUNCAO[ME.funcao]}`;
+    $('quem').textContent = `${ME.nome} · ${funcaoNome(ME)}`;
     document.querySelectorAll('[data-gestor]').forEach(b => b.hidden = !GESTOR);
     document.querySelectorAll('[data-pode-lancar]').forEach(b => b.hidden = !(GESTOR || ['gerente', 'administrativo'].includes(ME.funcao)));
     initFiltros(); renderRegras(); renderAll();
@@ -248,7 +254,7 @@ function renderPainel() {
   const m = mesResumo(ymNow);
   const cred = m.vendas.reduce((s, c) => s + c.credito, 0);
   const meta = r('meta_cotas') || 1, pct = Math.min(100, m.vendas.length / meta * 100);
-  const desp = despesasMes(ymNow), res = m.entrada + m.disal - m.imp - m.equipe - desp;
+  const desp = despesasMes(ymNow), folha = folhaMes(ymNow), res = m.entrada + m.disal - m.imp - m.equipe - folha - desp;
   const al = alertasLista();
   $('kpis').innerHTML =
     kpi('Cotas vendidas', `${m.vendas.length} <span style="font-size:14px;color:var(--muted)">/ ${meta}</span>`, `${pct.toFixed(0)}% da meta`, `<div class="meter"><i style="width:${pct}%"></i></div>`) +
@@ -264,9 +270,10 @@ function renderPainel() {
     ['Comissão Disal', m.disal, 'Vendas, 3ª a 5ª parcelas e estornos'],
     ['Imposto', -m.imp, `${r('imposto')}% sobre a comissão`],
     ['Comissões da equipe', -m.equipe, 'Vendedor, fechador, administrativo'],
+    ['Salários', -folha, `Pagos dias ${diasFolha().join(' e ')}, metade em cada data`],
     ['Despesas lançadas', -desp, 'Financeiro'],
   ].map(([t, v, s]) => `<div class="row"><div class="l">${t}<span>${s}</span></div><b class="${v < 0 ? 'neg' : ''}">${brl(v)}</b></div>`).join('') +
-    `<div class="row"><div class="l"><strong>Resultado parcial</strong><span>Inclua folha e aluguel no Financeiro</span></div><b class="${res < 0 ? 'neg' : 'pos'}" style="font-size:17px">${brl(res)}</b></div>`;
+    `<div class="row"><div class="l"><strong>Resultado parcial</strong><span>Aluguel e outras despesas entram pelo Financeiro</span></div><b class="${res < 0 ? 'neg' : 'pos'}" style="font-size:17px">${brl(res)}</b></div>`;
   const porEq = EQUIPES.filter(e => e.nome !== 'Administrativo').map(e => { const v = m.vendas.filter(c => c.equipe === e.nome); const ger = PESSOAS.find(p => p.equipe_id === e.id && p.funcao === 'gerente'); return { nome: e.nome, ger: ger ? ger.nome : '', n: v.length, cred: v.reduce((s, c) => s + c.credito, 0) }; }).sort((a, b) => b.n - a.n || b.cred - a.cred);
   $('rankEquipes').innerHTML = porEq.map((e, i) => `<div class="row"><div class="l"><span style="font-family:var(--f-num)">${i + 1}º</span>${esc(e.nome)} · ${esc(e.ger)}</div><b>${e.n} cotas · ${brl(e.cred)}</b></div>`).join('');
   const atras = al.filter(c => stView(c, 2) === 'atrasado').length;
@@ -278,6 +285,7 @@ function renderPainel() {
     [`${atras} clientes com a 2ª vencida sem baixa`, 'Ligar hoje antes do estorno', 'alertas'],
     [`${al.length - atras} clientes com a 2ª vencendo em 15 dias`, 'Contato preventivo do administrativo', 'alertas'],
     [`Pagamento da sexta ${fdate(prox)}: ${brl(aPagar)}`, 'Conferir antes de liberar', 'comissoes'],
+    [`Salários do dia ${fdate(proxFolha())}: ${brl(folhaTotal() / 2)}`, `${PESSOAS.filter(p => salarioDe(p) > 0).length} pessoas com salário fixo`, 'equipes'],
     [`${semCarteira} cotas ativas sem administrativo`, 'Definir a carteira de cada uma (base dos 0,05%)', 'cotas'],
     [`${pend} regras aguardando confirmação`, 'Vendedor e fechador fixo', 'regras']
   ].map(([t, s, v]) => `<div class="row"><div class="l">${t}<span>${s}</span></div><button class="btn ghost sm" data-go="${v}">Abrir</button></div>`).join('');
@@ -308,7 +316,7 @@ function renderComissoes() {
   const lista = Object.values(map).sort((a, b) => (b.com + b.est) - (a.com + a.est));
   const tc = lista.reduce((s, x) => s + x.com, 0), te = lista.reduce((s, x) => s + x.est, 0);
   $('kpisCom').innerHTML = kpi('Comissões', brl(tc)) + kpi('Estornos', `<span class="neg">${brl(te)}</span>`) + kpi('Total a pagar', brl(tc + te)) + kpi('Pessoas', lista.length);
-  $('tbCom').innerHTML = lista.length ? lista.map(x => { const p = pessoaPorId(x.id) || {}; return `<tr><td>${esc(p.nome)}</td><td>${FUNCAO[p.funcao] || '—'}</td><td>${esc(equipeNome(p.equipe_id))}</td><td class="r n">${x.cotas.size}</td><td class="r n">${brl(x.com, 2)}</td><td class="r n ${x.est ? 'neg' : ''}">${x.est ? brl(x.est, 2) : '—'}</td><td class="r n"><strong>${brl(x.com + x.est, 2)}</strong></td></tr>`; }).join('') +
+  $('tbCom').innerHTML = lista.length ? lista.map(x => { const p = pessoaPorId(x.id) || {}; return `<tr><td>${esc(p.nome)}</td><td>${funcaoNome(p)}</td><td>${esc(equipeNome(p.equipe_id))}</td><td class="r n">${x.cotas.size}</td><td class="r n">${brl(x.com, 2)}</td><td class="r n ${x.est ? 'neg' : ''}">${x.est ? brl(x.est, 2) : '—'}</td><td class="r n"><strong>${brl(x.com + x.est, 2)}</strong></td></tr>`; }).join('') +
     `<tr class="total"><td colspan="4">Total</td><td class="r n">${brl(tc, 2)}</td><td class="r n neg">${brl(te, 2)}</td><td class="r n">${brl(tc + te, 2)}</td></tr>`
     : `<tr><td colspan="7" class="empty">Nada a pagar nesta sexta.</td></tr>`;
 }
@@ -334,7 +342,8 @@ function renderFin() {
   }));
   const auto = Object.values(byDay).map(x => ({ ...x, origem: 'Automático', sinal: x.valor < 0 ? -1 : 1, valor: Math.abs(x.valor) }));
   const man = LANC.filter(l => noMes(l.data, ymNow)).map(l => ({ data: l.data, cat: l.categoria, desc: l.descricao || '', origem: 'Lançado', sinal: l.tipo === 'saida' ? -1 : 1, valor: l.valor }));
-  const todos = [...auto, ...man].sort((a, b) => b.data - a.data);
+  const fol = diasFolha().map(d => new Date(TODAY.getFullYear(), TODAY.getMonth(), d)).filter(d => d <= TODAY).map(d => ({ data: d, cat: 'Salários', desc: 'Salário fixo (metade do mês)', origem: 'Automático', sinal: -1, valor: folhaTotal() / 2 }));
+  const todos = [...auto, ...fol, ...man].sort((a, b) => b.data - a.data);
   const ent = todos.filter(x => x.sinal > 0).reduce((s, x) => s + x.valor, 0), sai = todos.filter(x => x.sinal < 0).reduce((s, x) => s + x.valor, 0);
   const traf = man.filter(l => l.cat === 'Tráfego pago').reduce((s, l) => s + l.valor, 0);
   const vendas = COTAS.filter(c => valida(c) && noMes(c.venda, ymNow)).length;
@@ -352,13 +361,13 @@ function renderEquipes() {
     const v = vm.filter(c => c.equipe === e.nome), pct = Math.min(100, v.length / (metaEq || 1) * 100);
     const ger = ativos.filter(p => p.equipe_id === e.id && p.funcao === 'gerente'), vend = ativos.filter(p => p.equipe_id === e.id && p.funcao === 'vendedor');
     return `<article class="team"><div class="team-head"><h2>${esc(e.nome)}</h2><span class="pill">${v.length} / ${metaEq} cotas</span></div><div class="meter"><i style="width:${pct}%"></i></div>
-      <div class="list">${ger.map(g => `<div class="row"><div class="l">${esc(g.nome)}<span>Gerente e fechador</span></div><b>${vm.filter(c => c.fechador_id === g.id).length} fechadas</b></div>`).join('')}
+      <div class="list">${ger.map(g => `<div class="row"><div class="l">${esc(g.nome)}<span>${g.gerente_geral ? 'Gerente geral e fechador' : 'Supervisor e fechador'}</span></div><b>${vm.filter(c => c.fechador_id === g.id).length} fechadas</b></div>`).join('')}
       ${vend.map(p => `<div class="row"><div class="l">${esc(p.nome)}<span>Vendedor</span></div><b>${vm.filter(c => c.vendedor_id === p.id).length} cotas</b></div>`).join('')}</div></article>`;
   }).join('') + `<article class="team"><div class="team-head"><h2>Administrativo</h2><span class="pill">${ativos.filter(p => ['administrativo', 'gerente_adm'].includes(p.funcao)).length} pessoas</span></div>
-    <div class="list">${ativos.filter(p => ['administrativo', 'gerente_adm'].includes(p.funcao)).map(p => `<div class="row"><div class="l">${esc(p.nome)}<span>${FUNCAO[p.funcao]}</span></div><b>${COTAS.filter(c => valida(c) && c.adm_id === p.id && c.p[5] !== 'pago' && c.p[2] !== 'nao_pago').length} clientes</b></div>`).join('')}</div></article>`;
+    <div class="list">${ativos.filter(p => ['administrativo', 'gerente_adm'].includes(p.funcao)).map(p => `<div class="row"><div class="l">${esc(p.nome)}<span>${funcaoNome(p)}</span></div><b>${COTAS.filter(c => valida(c) && c.adm_id === p.id && c.p[5] !== 'pago' && c.p[2] !== 'nao_pago').length} clientes</b></div>`).join('')}</div></article>`;
 }
 
-const GRUPOS = [['Disal e loja', ['entrada', 'disal_venda', 'disal_p345', 'estorno_disal', 'estorno_doc', 'recuperacao', 'imposto', 'meta_cotas']], ['Venda (por situação)', ['vendedor', 'vendedor_fecha', 'fechador_pct', 'fixo_fechador_sozinho', 'fixo_gerente_propria_equipe', 'fixo_fechador_outra_equipe', 'gerente_fechador_outra_equipe', 'gerente_vendedor_fecha_pct', 'gerente_vendedor_fecha_fixo']], ['Parcelas, estorno e bônus', ['adm_parcela', 'gerente_adm_parcela', 'estorno_equipe', 'gg_min_cotas', 'gg_por_cota']]];
+const GRUPOS = [['Disal e loja', ['entrada', 'disal_venda', 'disal_p345', 'estorno_disal', 'estorno_doc', 'recuperacao', 'imposto', 'meta_cotas']], ['Venda (por situação)', ['vendedor', 'vendedor_fecha', 'fechador_pct', 'fixo_fechador_sozinho', 'fixo_gerente_propria_equipe', 'fixo_fechador_outra_equipe', 'gerente_fechador_outra_equipe', 'gerente_vendedor_fecha_pct', 'gerente_vendedor_fecha_fixo']], ['Parcelas, estorno e bônus', ['adm_parcela', 'gerente_adm_parcela', 'estorno_equipe', 'gg_min_cotas', 'gg_por_cota']], ['Salários', ['salario_minimo', 'folha_dia_1', 'folha_dia_2']]];
 function renderRegras() {
   $('rules').innerHTML = GRUPOS.map(([t, ks]) => `<div class="panel"><h2>${t}</h2><div>${ks.filter(k => R[k]).map(k => `<div class="rule"><div class="t"><label for="r_${k}" style="color:var(--ink);font-size:14px">${esc(R[k].descricao)}</label>${R[k].pendente ? '<span class="pend">Pendente de confirmação</span>' : ''}</div><input id="r_${k}" type="number" step="any" value="${R[k].valor}" data-rule="${k}" ${GESTOR ? '' : 'disabled'}></div>`).join('')}</div></div>`).join('');
 }
@@ -380,7 +389,7 @@ function renderUsuarios() {
   $('tbUsuarios').innerHTML = lista.map(p => {
     const st = !p.ativo ? '<span class="chip c-canc">Inativo</span>' : p.user_id ? '<span class="chip c-pago">Acesso ativo</span>' : p.email ? '<span class="chip c-atrasado">Convite enviado</span>' : '<span class="chip c-aberto">Sem e-mail</span>';
     const acao = p.ativo && !p.user_id ? `<button class="btn sm" data-convidar="${p.id}">${p.email ? 'Reenviar convite' : 'Salvar e convidar'}</button>` : '';
-    return `<tr><td>${esc(p.nome)}</td><td>${FUNCAO[p.funcao] || '—'}</td><td>${esc(equipeNome(p.equipe_id))}</td><td><input type="email" aria-label="E-mail de ${esc(p.nome)}" value="${esc(p.email || '')}" data-email-de="${p.id}" placeholder="email@exemplo.com" style="min-width:220px" ${p.user_id ? 'disabled' : ''}></td><td>${st}</td><td>${acao}</td></tr>`;
+    return `<tr><td>${esc(p.nome)}</td><td>${funcaoNome(p)}</td><td>${esc(equipeNome(p.equipe_id))}</td><td><input type="email" aria-label="E-mail de ${esc(p.nome)}" value="${esc(p.email || '')}" data-email-de="${p.id}" placeholder="email@exemplo.com" style="min-width:220px" ${p.user_id ? 'disabled' : ''}></td><td>${st}</td><td>${acao}</td></tr>`;
   }).join('');
 }
 async function convidar(p, email) {

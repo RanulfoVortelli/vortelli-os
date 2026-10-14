@@ -43,3 +43,5 @@ O acesso é por link no e-mail. A pessoa só entra se o e-mail dela estiver cada
 3. Preencher `config.js` com a URL e a chave anon do projeto.
 4. No Supabase, em Authentication → URL Configuration, colocar o endereço do site.
 5. Publicar no GitHub Pages (branch main, pasta raiz).
+
+Última atualização: 14/10/2026 (cadastro de venda em duas etapas e confirmação da Disal).

@@ -134,12 +134,12 @@ async function carregar(user) {
   }
 }
 function montarCota(c, contatos) {
-  const p = {}, venc = {};
-  (c.parcelas || []).forEach(x => { p[x.numero] = x.status; venc[x.numero] = parseD(x.vencimento); });
+  const p = {}, venc = {}, disalEm = {};
+  (c.parcelas || []).forEach(x => { p[x.numero] = x.status; venc[x.numero] = parseD(x.vencimento); if (x.disal_em) disalEm[x.numero] = parseD(x.disal_em); });
   for (let k = 1; k <= 5; k++) { if (!p[k]) p[k] = k === 1 ? 'pago' : 'aberto'; }
   return {
     id: c.id, contrato: c.contrato, cliente: c.cliente, telefone: c.telefone, credito: Number(c.credito || 0), parcela: Number(c.parcela_valor || 0),
-    venda: parseD(c.data_venda), venc, p, status: c.status, estornoDoc: c.estorno_documento, recuperacao: parseD(c.recuperacao_data), equipeId: c.equipe_id,
+    venda: parseD(c.data_venda), venc, disalEm, p, status: c.status, estornoDoc: c.estorno_documento, recuperacao: parseD(c.recuperacao_data), equipeId: c.equipe_id,
     vendedor_id: c.vendedor_id, fechador_id: c.fechador_id, adm_id: c.adm_id,
     cpf: c.cpf, grupo: c.grupo, cotaNum: c.cota, venc1: c.vencimento_1, login: c.login_disal,
     confirmada: c.disal_confirmada !== false, confirmadaEm: parseD(c.disal_confirmada_em) || parseD(c.data_venda),
@@ -150,7 +150,9 @@ function montarCota(c, contatos) {
 const valida = c => c.status !== 'cancelada' && c.credito > 0;
 const incompleta = c => valida(c) && (!c.contrato || !c.adm_id);
 // Base da comissão da venda: a data em que a Disal confirmou (ou a venda, se confirmou antes)
-const baseVenda = c => c.confirmadaEm && c.confirmadaEm > c.venda ? c.confirmadaEm : c.venda;
+const semanaDisal = d => addDays(d, -7);   // sextaPagamento(d - 7) = sexta da semana do borderô
+const baseVenda = c => c.confirmadaEm && semanaDisal(c.confirmadaEm) > c.venda ? semanaDisal(c.confirmadaEm) : c.venda;
+const dataParcela = (c, k) => c.disalEm && c.disalEm[k] ? semanaDisal(c.disalEm[k]) : venc(c, k);
 const soDig = s => String(s || '').replace(/\D/g, '');
 const fmtCpf = s => { const d = soDig(s); return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : (s || ''); };
 const podeLancar = () => GESTOR || (ME && ['gerente', 'administrativo', 'gerente_adm'].includes(ME.funcao));
@@ -164,7 +166,7 @@ function eventosLoja(c) {
   const ev = [{ data: c.venda, tipo: 'entrada', valor: r('entrada') - c.parcela },
               { data: baseVenda(c), tipo: 'disal', valor: c.credito * r('disal_venda') / 100, previsto: !c.confirmada }];
   for (let k = 3; k <= 5; k++) {
-    if (c.p[k] === 'pago') ev.push({ data: venc(c, k), tipo: 'disal', valor: c.credito * r('disal_p345') / 100 });
+    if (c.p[k] === 'pago') ev.push({ data: dataParcela(c, k), tipo: 'disal', valor: c.credito * r('disal_p345') / 100 });
     else if (c.p[k] === 'aberto') ev.push({ data: venc(c, k), tipo: 'disal', valor: c.credito * r('disal_p345') / 100, previsto: true });
   }
   if (c.p[2] === 'nao_pago') ev.push({ data: addDays(venc(c, 2), 5), tipo: 'disal', valor: -c.credito * r(c.estornoDoc ? 'estorno_doc' : 'estorno_disal') / 100 });
@@ -221,7 +223,7 @@ function eventosEquipe(c) {
   const gerAdm = PESSOAS.filter(p => p.funcao === 'gerente_adm' && p.ativo);
   for (let k = 3; k <= 5; k++) {
     if (c.p[k] !== 'pago') continue;
-    const d = venc(c, k);
+    const d = dataParcela(c, k);
     if (c.adm_id) ev.push({ pessoa: c.adm_id, papel: 'Administrativo', data: d, valor: c.credito * r('adm_parcela') / 100, tipo: 'com', cota: c });
     gerAdm.forEach(g => ev.push({ pessoa: g.id, papel: 'Gerente adm', data: d, valor: c.credito * r('gerente_adm_parcela') / 100, tipo: 'com', cota: c }));
   }
@@ -527,6 +529,7 @@ function initFiltros() {
 }
 function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); renderUsuarios(); renderRanking(); renderMinha(); }
 function go(view) {
+  if (view === 'conferencia') abrirConferencia();
   if (view === 'ranking' && !GESTOR && !$('rkTv').src) $('rkTv').src = 'tv.html?embed=1';
   document.querySelectorAll('[data-page]').forEach(s => s.hidden = s.dataset.page !== view);
   document.querySelectorAll('#nav button').forEach(b => { if (b.dataset.view === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
@@ -671,6 +674,347 @@ document.addEventListener('click', async e => {
   const inp = document.querySelector(`[data-email-de="${p.id}"]`);
   b.disabled = true; await convidar(p, inp ? inp.value : p.email); b.disabled = false;
 });
+
+/* Vortelli OS — Conferência semanal com o relatório "Comissões a pagar" da Disal (14/10/2026)
+   O CEO sobe o arquivo; o sistema lê o borderô, confere contrato por contrato com as vendas cadastradas,
+   mostra o que vai mudar e só grava ao clicar em Aplicar. Vendas da representação (DS Capital) ficam à parte
+   e geram um PDF para enviar a eles. */
+
+const LIB_XLSX = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+const LIB_PDF = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+const LIB_PDFT = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+const CF = { rel: null, grupos: [], repr: [], reprLista: [], hist: [], salvo: false, carregado: false };
+
+const normNome = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\(.*?\)/g, ' ')
+  .toUpperCase().replace(/[^A-Z ]/g, ' ').replace(/\s+/g, ' ').trim();
+const numBR = v => typeof v === 'number' ? v : (v == null || String(v).trim() === '' ? 0 : Number(String(v).replace(/[R$\s.]/g, '').replace(',', '.')) || 0);
+function dataBR(v) {
+  if (v instanceof Date) return iso(v);
+  if (typeof v === 'number') { const d = new Date(Math.round((v - 25569) * 864e5)); return iso(new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())); }
+  const m = String(v || '').match(/(\d{2})\/(\d{2})\/(\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+}
+const dBR = s => s ? s.split('-').reverse().join('/') : '—';
+function carregarScript(src, global) {
+  return new Promise((ok, err) => {
+    if ((global && window[global]) || document.querySelector(`script[src="${src}"]`)) return ok();
+    const s = document.createElement('script'); s.src = src; s.onload = ok;
+    s.onerror = () => err(new Error('não foi possível carregar a biblioteca (' + src.split('/').slice(-2, -1)[0] + ')'));
+    document.head.appendChild(s);
+  });
+}
+
+/* ---------- Leitura do arquivo da Disal ---------- */
+function lerRelatorio(rows, arquivo) {
+  const rels = []; let cur = null, cols = null, login = null;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || [], t = r.map(x => x == null ? '' : String(x)).join(' ');
+    if (!login && r[0] != null) { const lg = String(r[0]).match(/^\s*\d{4,}\s*-\s*(.+?)\s*$/); if (lg) login = lg[1]; }
+    const b = t.match(/Border[ôo]\s*:\s*(\d+)\s*-\s*(\d{2}\/\d{2}\/\d{4})/i);
+    if (b) {
+      cur = { bordero: b[1], data: dataBR(b[2]), login: login || '', arquivo, total: null, itens: [] }; rels.push(cur);
+      const tt = t.match(/TOTAL DE COMISS[ÕO]ES\s*:\s*R\$\s*([\d.,]+)/i); if (tt) cur.total = numBR(tt[1]);
+      continue;
+    }
+    if (r.some(x => String(x || '').trim().toLowerCase() === 'contrato')) {
+      const up = rows[i - 1] || []; cols = [];
+      r.forEach((x, j) => cols.push((String(up[j] || '') + ' ' + String(x || '')).replace(/\s+/g, ' ').trim().toLowerCase()));
+      continue;
+    }
+    if (!cur || !cols) continue;
+    const col = re => { const j = cols.findIndex(k => re.test(k)); return j < 0 ? undefined : r[j]; };
+    const contrato = String(col(/^contrato$/) ?? '').replace(/\D/g, '');
+    if (contrato.length < 5) continue;
+    const pcl = parseInt(String(col(/^pcl$/) ?? '').trim(), 10);
+    cur.itens.push({
+      contrato, cota_txt: String(col(/^cota$/) ?? '').trim(), cliente: String(col(/^cliente$/) ?? '').trim(),
+      data_venda: dataBR(col(/data venda/)), pcl: Number.isFinite(pcl) ? pcl : null, base: numBR(col(/base/)),
+      com_venda: numBR(col(/^comiss.o venda/)), est_venda: numBR(col(/^est.*venda/)),
+      com_entrega: numBR(col(/^comiss.o entrega/)), est_entrega: numBR(col(/^est.*entrega/)),
+      vendedor_disal: String(col(/^vendedor$/) ?? '').trim()
+    });
+  }
+  return rels.filter(x => x.itens.length);
+}
+
+/* ---------- Conferência com o sistema ---------- */
+function acharCota(it, porContrato, porNome) {
+  const c = porContrato.get(it.contrato); if (c) return { c, corrigir: false };
+  const l = porNome.get(normNome(it.cliente)) || [];
+  if (!l.length) return { c: null };
+  const alvo = parseD(it.data_venda);
+  const best = l.slice().sort((a, b) => Math.abs((a.venda || 0) - alvo) - Math.abs((b.venda || 0) - alvo))[0];
+  return { c: best, corrigir: true };
+}
+function conferir(rel) {
+  const porContrato = new Map(COTAS.filter(c => c.contrato).map(c => [String(c.contrato).replace(/\D/g, ''), c]));
+  const porNome = new Map(); COTAS.forEach(c => { const k = normNome(c.cliente); if (!porNome.has(k)) porNome.set(k, []); porNome.get(k).push(c); });
+  const reprDe = v => CF.reprLista.find(x => x.ativa && (x.vendedores_disal || []).some(n => normNome(n) === normNome(v)));
+  const grupos = new Map();
+  rel.itens.forEach(it => {
+    const rp = reprDe(it.vendedor_disal);
+    it.tipo = rp ? 'representacao' : 'loja'; it.repr = rp || null;
+    const k = it.tipo + ':' + it.contrato;
+    if (!grupos.has(k)) grupos.set(k, { contrato: it.contrato, cliente: it.cliente, cotaTxt: it.cota_txt, dataVenda: it.data_venda, base: it.base, vendedorDisal: it.vendedor_disal, tipo: it.tipo, repr: rp, linhas: [] });
+    grupos.get(k).linhas.push(it);
+  });
+  const lista = [...grupos.values()];
+  lista.filter(g => g.tipo === 'loja').forEach(g => {
+    const { c, corrigir } = acharCota(g, porContrato, porNome);
+    g.cota = c; g.corrigir = !!(c && corrigir);
+    g.linhas.forEach(it => { it.cota_id = c ? c.id : null; });
+    g.venda = g.linhas.some(x => [1, 2].includes(x.pcl) && x.com_venda > 0);
+    g.pclVenda = g.linhas.filter(x => [1, 2].includes(x.pcl) && x.com_venda > 0).map(x => x.pcl);
+    g.parcelas = [...new Set(g.linhas.filter(x => x.pcl >= 3 && x.pcl <= 5 && x.com_venda > 0).map(x => x.pcl))].sort();
+    g.estorno = g.linhas.reduce((s, x) => s + x.est_venda, 0);
+    g.entrega = g.linhas.reduce((s, x) => s + x.com_entrega + x.est_entrega, 0);
+    g.valor = g.linhas.reduce((s, x) => s + x.com_venda + x.est_venda + x.com_entrega + x.est_entrega, 0);
+    g.acoes = []; g.alertas = []; g.infos = [];
+    if (!c) { g.alertas.push({ tipo: 'nao_cadastrada', txt: 'Venda paga pela Disal que não está no sistema.' }); return; }
+    if (g.corrigir) g.acoes.push({ tipo: 'contrato', txt: `Corrigir contrato ${c.contrato || '(vazio)'} → ${g.contrato}` });
+    if (g.venda) {
+      if (c.status === 'cancelada') g.alertas.push({ tipo: 'cancelada_paga', txt: 'Cancelada no sistema, mas a Disal pagou a venda. A equipe não recebe; a Disal deve estornar depois.' });
+      else if (c.status === 'estornada') g.alertas.push({ tipo: 'recuperacao', txt: `Estornada no sistema e a Disal pagou a ${g.pclVenda.join('ª e ')}ª parcela. Se o cliente voltou a pagar, registre a recuperação (a equipe recebe o estorno de volta).` });
+      else if (!c.confirmada) g.acoes.push({ tipo: 'confirmar', txt: 'Confirmar venda paga: libera a comissão' });
+      else g.infos.push('Venda já confirmada');
+    }
+    g.parcelas.forEach(k => {
+      if (['cancelada'].includes(c.status)) return g.alertas.push({ tipo: 'parcela_cancelada', txt: `Disal pagou a ${k}ª parcela de uma venda cancelada no sistema.` });
+      if (c.p[k] === 'pago') g.infos.push(`${k}ª já baixada`);
+      else g.acoes.push({ tipo: 'baixa', k, txt: `Dar baixa na ${k}ª parcela${c.adm_id ? '' : ' (sem administrativo na carteira)'}` });
+    });
+    if (g.estorno < 0) {
+      if (c.p[2] === 'nao_pago') g.infos.push('Estorno já registrado');
+      else g.alertas.push({ tipo: 'estorno', txt: `A Disal estornou ${brl(-g.estorno, 2)} (${(-g.estorno / g.base * 100).toLocaleString('pt-BR')}% do crédito). No sistema a 2ª parcela está "${c.p[2]}". Se confirmar, a equipe devolve 50%.` });
+    }
+    if (g.entrega) g.infos.push(`Comissão de entrega ${brl(g.entrega, 2)} (só da loja)`);
+  });
+  lista.filter(g => g.tipo === 'representacao').forEach(g => {
+    const rp = g.repr, imp = rp.desconta_imposto ? r('imposto') / 100 : 0; g.reprLinhas = [];
+    const temP1 = g.linhas.some(x => x.pcl === 1 && x.com_venda > 0);
+    let estornou = false;
+    g.linhas.forEach(x => {
+      let pct = 0, desc = '';
+      if (x.com_venda > 0 && (x.pcl === 1 || (x.pcl === 2 && !temP1 && !g.reprLinhas.some(l => l.desc === 'Venda')))) { pct = Number(rp.pct_venda); desc = 'Venda'; }
+      else if (x.com_venda > 0 && x.pcl >= 3) { pct = Number(rp.pct_parcela); desc = `${x.pcl}ª parcela`; }
+      else if (x.est_venda < 0 && !estornou) { pct = -Number(rp.pct_estorno); desc = 'Estorno (2ª não paga)'; estornou = true; }
+      if (!pct) return;
+      const bruto = x.base * pct / 100, imposto = bruto * imp;
+      g.reprLinhas.push({ desc, pct, bruto, imposto, liquido: bruto - imposto });
+    });
+    if (g.linhas.some(x => x.com_entrega || x.est_entrega)) g.infos = ['Comissão de entrega da Disal: não entra no repasse'];
+  });
+  return lista;
+}
+
+/* ---------- Tela ---------- */
+const chipAcao = t => ({ confirmar: '<span class="chip c-pago">Confirmar venda</span>', baixa: '<span class="chip c-pago">Baixa</span>', contrato: '<span class="chip c-atrasado">Corrigir contrato</span>' }[t] || '');
+function quem(c) { return c ? `${esc(c.vendedor)}${c.fechador !== c.vendedor ? ' / ' + esc(c.fechador) : ''}` : '—'; }
+function renderConferencia() {
+  const el = $('cfConteudo'); if (!el) return;
+  renderHistorico();
+  if (!CF.rel) {
+    el.innerHTML = `<div class="panel cf-drop" id="cfDrop"><h2>Nenhum relatório aberto</h2><p class="sub">Toda segunda, baixe na Disal o relatório <b>Comissões a pagar</b> (Excel) e solte aqui, ou use o botão <b>Subir relatório da Disal</b>. Nada é gravado até você clicar em <b>Aplicar</b>.</p></div>`;
+    return;
+  }
+  const R0 = CF.rel, loja = CF.grupos.filter(g => g.tipo === 'loja'), rep = CF.grupos.filter(g => g.tipo === 'representacao');
+  const soma = R0.itens.reduce((s, x) => s + x.com_venda + x.est_venda + x.com_entrega + x.est_entrega, 0);
+  const bate = R0.total == null || Math.abs(soma - R0.total) < 0.5;
+  const acoes = loja.flatMap(g => g.acoes.map(a => ({ ...a, g })));
+  const alertas = loja.flatMap(g => g.alertas.map(a => ({ ...a, g })));
+  const confirmar = acoes.filter(a => a.tipo === 'confirmar'), baixas = acoes.filter(a => a.tipo === 'baixa');
+  const vendasPagas = loja.filter(g => g.venda && g.cota && !['cancelada', 'estornada'].includes(g.cota.status));
+  const repLiq = rep.reduce((s, g) => s + g.reprLinhas.reduce((t, l) => t + l.liquido, 0), 0);
+  const sexta = sextaPagamento(addDays(parseD(R0.data), -7));
+  const repNome = [...new Set(rep.map(g => g.repr.nome))].join(', ') || 'Representação';
+
+  el.innerHTML = `
+  <div class="panel cf-bordero">
+    <div><span class="eyebrow">Borderô ${esc(R0.bordero)} · ${dBR(R0.data)} · login ${esc(R0.login || '—')}</span>
+      <h2>${brl(R0.total ?? soma, 2)} a receber da Disal</h2>
+      <p class="sub">${R0.itens.length} linhas, ${CF.grupos.length} contratos · arquivo ${esc(R0.arquivo || '')} · ${bate ? '<span class="cf-ok">soma das linhas confere com o total</span>' : `<span class="neg">soma das linhas (${brl(soma, 2)}) diferente do total</span>`}</p></div>
+    <div class="cf-bordero-acts">${CF.salvo ? '<span class="chip c-pago">Conferência aplicada</span>' : ''}
+      <button class="btn" id="cfFechar" type="button">Fechar</button>
+      <button class="btn gold" id="cfAplicar" type="button" ${acoes.length || !CF.salvo ? '' : 'disabled'}>${acoes.length ? `Aplicar ${acoes.length} alteraç${acoes.length > 1 ? 'ões' : 'ão'}` : CF.salvo ? 'Nada a aplicar' : 'Guardar relatório'}</button></div>
+  </div>
+  <div class="kpis" style="margin:16px 0">
+    ${kpi('Vendas pagas pela Disal', vendasPagas.length, `${confirmar.length} a confirmar · comissão na sexta ${fdate(sexta)}`)}
+    ${kpi('Parcelas 3ª a 5ª', loja.reduce((s, g) => s + g.parcelas.length, 0), `${baixas.length} a dar baixa (comissão do administrativo)`)}
+    ${kpi('Para você decidir', alertas.length, alertas.length ? 'veja a lista abaixo' : 'nenhum ponto de atenção')}
+    ${kpi(repNome, rep.length ? brl(repLiq, 2) : '—', rep.length ? `${rep.length} contrato${rep.length > 1 ? 's' : ''} · líquido a repassar` : 'nenhuma venda neste borderô')}
+  </div>
+  ${alertas.length ? `<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Para você decidir</h2><span class="note">o sistema não muda nada disso sozinho</span></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Venda</th><th>Vendedor / fechador</th><th>O que aconteceu</th><th class="r">Disal</th><th></th></tr></thead><tbody>
+    ${alertas.map(a => `<tr><td class="num">${esc(a.g.contrato)}</td><td>${esc(a.g.cliente)}</td><td class="num">${dBR(a.g.dataVenda)}</td><td>${a.g.cota ? quem(a.g.cota) : `<span class="note">Disal: ${esc(a.g.vendedorDisal)}</span>`}</td><td class="cf-wrap">${esc(a.txt)}</td><td class="r n ${a.g.valor < 0 ? 'neg' : ''}">${brl(a.g.valor, 2)}</td><td>${botaoAlerta(a)}</td></tr>`).join('')}
+    </tbody></table></div></div>` : ''}
+  <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Vendas da loja no borderô</h2><span class="note">${acoes.length ? 'em dourado: o que muda ao clicar em Aplicar' : 'tudo já está em dia no sistema'}</span></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Venda</th><th>Pcl</th><th>Vendedor / fechador</th><th class="r">Crédito</th><th class="r">Disal</th><th>Situação</th></tr></thead><tbody>
+    ${loja.sort((a, b) => (b.dataVenda || '').localeCompare(a.dataVenda || '')).map(g => `<tr class="${g.acoes.length ? 'cf-muda' : ''}"><td class="num">${esc(g.contrato)}</td><td>${esc(g.cliente)}</td><td class="num">${dBR(g.dataVenda)}</td><td class="num">${g.linhas.map(x => x.pcl || 'E').join(', ')}</td><td>${g.cota ? quem(g.cota) : '<span class="note">não cadastrada</span>'}</td><td class="r n">${brl(g.base)}</td><td class="r n ${g.valor < 0 ? 'neg' : ''}">${brl(g.valor, 2)}</td><td class="cf-wrap">${[...g.acoes.map(a => `<span class="cf-tag">${esc(a.txt)}</span>`), ...g.alertas.map(() => '<span class="chip c-atrasado">Decidir</span>'), ...g.infos.map(t => `<span class="note">${esc(t)}</span>`)].join(' ') || '<span class="note">—</span>'}</td></tr>`).join('')}
+    </tbody></table></div></div>
+  ${rep.length ? renderRepr(rep) : ''}`;
+}
+function botaoAlerta(a) {
+  const c = a.g.cota;
+  if (a.tipo === 'estorno' && c) return `<button class="btn sm" data-cf="estorno:${c.id}">Marcar 2ª não paga</button>`;
+  if (a.tipo === 'recuperacao' && c && !c.recuperacao) return `<button class="btn sm" data-cf="recuperacao:${c.id}">Registrar recuperação</button>`;
+  if (a.tipo === 'nao_cadastrada') return `<button class="btn sm" data-cf="cadastrar:${a.g.contrato}">Cadastrar venda</button>`;
+  if (a.tipo === 'cancelada_paga' && c) return `<button class="btn sm" data-cf="abrir:${c.id}">Abrir venda</button>`;
+  return '';
+}
+function renderRepr(rep) {
+  const nomes = [...new Set(rep.map(g => g.repr.nome))];
+  return nomes.map(nome => {
+    const gs = rep.filter(g => g.repr.nome === nome), rp = gs[0].repr;
+    const linhas = gs.flatMap(g => g.reprLinhas.map(l => ({ g, l })));
+    const tot = k => linhas.reduce((s, x) => s + x.l[k], 0);
+    return `<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>${esc(nome)} · representação</h2>
+      <span class="note">${String(rp.pct_venda).replace('.', ',')}% na venda, ${String(rp.pct_parcela).replace('.', ',')}% na 3ª, 4ª e 5ª, −${String(rp.pct_estorno).replace('.', ',')}% no estorno${rp.desconta_imposto ? ` · imposto de ${String(r('imposto')).replace('.', ',')}% descontado` : ''}. Não entra no ranking nem na comissão da loja.</span></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Venda</th><th>Lançamento</th><th class="r">Crédito</th><th class="r">%</th><th class="r">Bruto</th><th class="r">Imposto</th><th class="r">Líquido</th></tr></thead><tbody>
+      ${linhas.map(({ g, l }) => `<tr><td class="num">${esc(g.contrato)}</td><td>${esc(g.cliente)}</td><td class="num">${dBR(g.dataVenda)}</td><td>${esc(l.desc)}</td><td class="r n">${brl(g.base)}</td><td class="r n">${l.pct.toLocaleString('pt-BR')}%</td><td class="r n ${l.bruto < 0 ? 'neg' : ''}">${brl(l.bruto, 2)}</td><td class="r n">${brl(-l.imposto, 2)}</td><td class="r n"><strong>${brl(l.liquido, 2)}</strong></td></tr>`).join('') || '<tr><td colspan="9" class="empty">Nenhum lançamento com repasse.</td></tr>'}
+      <tr class="total"><td colspan="6">Total a repassar</td><td class="r n">${brl(tot('bruto'), 2)}</td><td class="r n">${brl(-tot('imposto'), 2)}</td><td class="r n">${brl(tot('liquido'), 2)}</td></tr>
+      </tbody></table></div>
+      <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn gold" type="button" data-cf="pdf:${esc(nome)}">Gerar relatório em PDF</button><span class="note">Arquivo pronto para enviar à ${esc(nome)}.</span></div></div>`;
+  }).join('');
+}
+function renderHistorico() {
+  const el = $('cfHist'); if (!el) return;
+  el.innerHTML = CF.hist.length ? `<div class="tbl-wrap"><table><thead><tr><th>Borderô</th><th>Data</th><th>Login</th><th class="r">Total</th><th>Conferido em</th><th></th></tr></thead><tbody>
+    ${CF.hist.map(h => `<tr><td class="num">${esc(h.bordero)}</td><td class="num">${dBR(h.data)}</td><td>${esc(h.login || '—')}</td><td class="r n">${h.total != null ? brl(Number(h.total), 2) : '—'}</td><td class="num">${h.aplicado_em ? new Date(h.aplicado_em).toLocaleDateString('pt-BR') : '—'}</td><td><button class="btn sm" data-cf="hist:${h.id}">Abrir</button></td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="empty">Nenhum relatório conferido ainda.</p>';
+}
+
+/* ---------- Ações ---------- */
+async function carregarBaseConferencia() {
+  const [rp, hs] = await Promise.all([sb.from('representacoes').select('*'), sb.from('disal_relatorios').select('*').order('data', { ascending: false }).limit(30)]);
+  if (rp.error) throw rp.error;
+  CF.reprLista = rp.data || []; CF.hist = hs.data || []; CF.carregado = true;
+}
+async function abrirConferencia() {
+  if (!GESTOR) return;
+  try { if (!CF.carregado) await carregarBaseConferencia(); } catch (e) { $('cfConteudo').innerHTML = `<div class="panel"><p class="neg">Não foi possível abrir a conferência: ${esc(e.message || e)}</p></div>`; return; }
+  renderConferencia();
+}
+async function lerArquivo(file) {
+  if (!file) return;
+  try {
+    await carregarScript(LIB_XLSX, 'XLSX'); if (!CF.carregado) await carregarBaseConferencia();
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+    const rels = lerRelatorio(rows, file.name);
+    if (!rels.length) return toast('Não encontrei o borderô nesse arquivo. É o relatório "Comissões a pagar" da Disal?');
+    if (rels.length > 1) toast(`O arquivo tem ${rels.length} borderôs; abrindo o primeiro (${rels[0].bordero}).`);
+    CF.rel = rels[0]; CF.grupos = conferir(CF.rel);
+    CF.salvo = CF.hist.some(h => h.bordero === CF.rel.bordero && (h.login || '') === CF.rel.login);
+    renderConferencia(); $('cfConteudo').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { console.error(e); toast('Erro ao ler o arquivo: ' + (e.message || e)); }
+}
+async function abrirHistorico(id) {
+  const h = CF.hist.find(x => x.id === id); if (!h) return;
+  const { data, error } = await sb.from('disal_itens').select('*').eq('relatorio_id', id).order('id');
+  if (error) return toast('Não foi possível abrir: ' + error.message);
+  CF.rel = { bordero: h.bordero, data: h.data, login: h.login || '', arquivo: h.arquivo, total: h.total != null ? Number(h.total) : null,
+    itens: data.map(x => ({ ...x, base: Number(x.base), com_venda: Number(x.com_venda), est_venda: Number(x.est_venda), com_entrega: Number(x.com_entrega), est_entrega: Number(x.est_entrega) })) };
+  CF.grupos = conferir(CF.rel); CF.salvo = true; renderConferencia(); window.scrollTo(0, 0);
+}
+async function aplicarConferencia() {
+  const R0 = CF.rel, b = $('cfAplicar'); b.disabled = true; b.textContent = 'Aplicando…';
+  const erros = [];
+  try {
+    let { data: rel, error } = await sb.from('disal_relatorios').select('id').eq('bordero', R0.bordero).eq('login', R0.login).maybeSingle();
+    if (error) throw error;
+    if (!rel) {
+      ({ data: rel, error } = await sb.from('disal_relatorios').insert({ bordero: R0.bordero, data: R0.data, login: R0.login, total: R0.total, arquivo: R0.arquivo }).select('id').single());
+      if (error) throw error;
+    } else {
+      ({ error } = await sb.from('disal_itens').delete().eq('relatorio_id', rel.id)); if (error) throw error;
+    }
+    ({ error } = await sb.from('disal_itens').insert(R0.itens.map(x => ({
+      relatorio_id: rel.id, contrato: x.contrato, cota_txt: x.cota_txt, cliente: x.cliente, data_venda: x.data_venda, pcl: x.pcl, base: x.base,
+      com_venda: x.com_venda, est_venda: x.est_venda, com_entrega: x.com_entrega, est_entrega: x.est_entrega, vendedor_disal: x.vendedor_disal,
+      cota_id: x.tipo === 'loja' ? x.cota_id : null, tipo: x.tipo, situacao: null }))));
+    if (error) throw error;
+    const dataB = R0.data, dB = parseD(dataB);
+    for (const g of CF.grupos.filter(x => x.tipo === 'loja' && x.cota)) {
+      const c = g.cota;
+      for (const a of g.acoes) {
+        let res;
+        if (a.tipo === 'contrato') { res = await sb.from('cotas').update({ contrato: g.contrato }).eq('id', c.id); if (!res.error) c.contrato = g.contrato; }
+        if (a.tipo === 'confirmar') { res = await sb.from('cotas').update({ disal_confirmada: true, disal_confirmada_em: dataB }).eq('id', c.id); if (!res.error) { c.confirmada = true; c.confirmadaEm = dB; } }
+        if (a.tipo === 'baixa') {
+          const jaPago = c.p[a.k] === 'pago';
+          res = await sb.from('parcelas').update(jaPago ? { disal_em: dataB } : { status: 'pago', pago_em: dataB, disal_em: dataB }).eq('cota_id', c.id).eq('numero', a.k);
+          if (!res.error) { c.p[a.k] = 'pago'; (c.disalEm ||= {})[a.k] = dB; }
+          if (!res.error && a.k === 5) { await sb.from('cotas').update({ status: 'concluida' }).eq('id', c.id); c.status = 'concluida'; }
+        }
+        if (res && res.error) erros.push(`${g.contrato}: ${res.error.message}`);
+      }
+    }
+    await carregarBaseConferencia();
+    CF.grupos = conferir(R0); CF.salvo = true;
+    renderAll(); renderConferencia();
+    toast(erros.length ? `Aplicado com ${erros.length} erro(s): ${erros[0]}` : 'Conferência aplicada. Comissões atualizadas.');
+  } catch (e) { console.error(e); toast('Não foi possível aplicar: ' + (e.message || e)); renderConferencia(); }
+}
+async function gerarPdfRepr(nome) {
+  try { await carregarScript(LIB_PDF, 'jspdf'); await carregarScript(LIB_PDFT); } catch (e) { return toast('Erro: ' + e.message); }
+  const R0 = CF.rel, gs = CF.grupos.filter(g => g.tipo === 'representacao' && g.repr.nome === nome), rp = gs[0].repr;
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const m = v => brl(v, 2).replace('−', '-').replace(/\u00a0/g, ' ');
+  const pct = v => String(v).replace('.', ',') + '%';
+  doc.setFillColor(15, 37, 71); doc.rect(0, 0, 210, 28, 'F');
+  doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+  doc.text(`Relatório de comissões - ${nome}`, 14, 13);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  doc.text(`Borderô Disal ${R0.bordero} de ${dBR(R0.data)}${R0.login ? ' · login ' + R0.login : ''}`, 14, 21);
+  doc.setTextColor(13, 26, 48); doc.setFontSize(10);
+  doc.text(`Coordenação: ${ME ? ME.nome : ''} · Vortelli Consórcio e Financiamento`, 14, 37);
+  doc.text(`Regra: ${pct(rp.pct_venda)} do crédito na venda, ${pct(rp.pct_parcela)} na 3ª, 4ª e 5ª parcela, -${pct(rp.pct_estorno)} se o cliente não pagar a 2ª.${rp.desconta_imposto ? ` Imposto de ${pct(r('imposto'))} descontado.` : ''}`, 14, 43, { maxWidth: 182 });
+  const linhas = gs.flatMap(g => g.reprLinhas.map(l => [g.contrato, String(g.cotaTxt || '').replace(/\.0+$/, ''), g.cliente, dBR(g.dataVenda), l.desc, m(g.base), pct(l.pct.toLocaleString('pt-BR')).replace(/,%$/, '%'), m(l.bruto), m(-l.imposto), m(l.liquido)]));
+  const tot = k => gs.reduce((s, g) => s + g.reprLinhas.reduce((t, l) => t + l[k], 0), 0);
+  doc.autoTable({
+    startY: 52, head: [['Contrato', 'Grupo/cota', 'Cliente', 'Venda', 'Lançamento', 'Crédito', '%', 'Bruto', 'Imposto', 'Líquido']], body: linhas,
+    foot: [['', '', '', '', 'Total', '', '', m(tot('bruto')), m(-tot('imposto')), m(tot('liquido'))]],
+    styles: { fontSize: 8, cellPadding: 1.8 }, headStyles: { fillColor: [15, 37, 71] }, footStyles: { fillColor: [245, 236, 217], textColor: [13, 26, 48], fontStyle: 'bold' },
+    columnStyles: { 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' }, 8: { halign: 'right' }, 9: { halign: 'right', fontStyle: 'bold' } }
+  });
+  const y = doc.lastAutoTable.finalY + 10;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(`Total líquido a receber: ${m(tot('liquido'))}`, 14, y);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(90, 105, 132);
+  doc.text(`Gerado em ${new Date().toLocaleDateString('pt-BR')} pelo Vortelli OS a partir do relatório "Comissões a pagar" da Disal.`, 14, 287);
+  doc.save(`${nome.replace(/\s+/g, '_')}_bordero_${R0.bordero}.pdf`);
+}
+function cadastrarDoRelatorio(contrato) {
+  const g = CF.grupos.find(x => x.contrato === contrato); go('cotas'); abrirForm(null);
+  $('fCliente').value = g.cliente; $('fContrato').value = g.contrato; $('fCredito').value = g.base || '';
+  if (g.dataVenda) $('fData').value = g.dataVenda;
+  const [grupo, cota] = String(g.cotaTxt || '').split('/'); if (grupo) $('fGrupo').value = String(+grupo || grupo); if (cota) $('fCotaN').value = String(parseInt(cota, 10) || cota);
+  toast('Complete vendedor, fechador, CPF e telefone. Depois suba o relatório de novo para confirmar a venda.');
+}
+
+/* ---------- Eventos ---------- */
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-cf]'); if (!b) return;
+  const [acao, arg] = b.dataset.cf.split(/:(.*)/s);
+  if (acao === 'estorno') { await salvarParcela(COTAS.find(c => c.id === +arg), 2, 'nao_pago'); CF.grupos = conferir(CF.rel); renderConferencia(); }
+  if (acao === 'recuperacao') {
+    const c = COTAS.find(x => x.id === +arg);
+    const { error } = await sb.from('cotas').update({ recuperacao_data: CF.rel.data }).eq('id', c.id);
+    if (error) return toast('Não foi possível salvar: ' + error.message);
+    c.recuperacao = parseD(CF.rel.data); toast('Recuperação registrada: a equipe recebe o estorno de volta.'); renderAll(); CF.grupos = conferir(CF.rel); renderConferencia();
+  }
+  if (acao === 'cadastrar') cadastrarDoRelatorio(arg);
+  if (acao === 'abrir') { go('cotas'); abrirForm(COTAS.find(c => c.id === +arg)); }
+  if (acao === 'pdf') gerarPdfRepr(arg);
+  if (acao === 'hist') abrirHistorico(+arg);
+});
+document.addEventListener('click', e => {
+  if (e.target.closest('#cfAplicar')) aplicarConferencia();
+  if (e.target.closest('#cfFechar')) { CF.rel = null; CF.grupos = []; renderConferencia(); }
+});
+$('cfArquivo').addEventListener('change', e => { lerArquivo(e.target.files[0]); e.target.value = ''; });
+const secConf = document.querySelector('[data-page="conferencia"]');
+secConf.addEventListener('dragover', e => { e.preventDefault(); secConf.classList.add('cf-arrastando'); });
+secConf.addEventListener('dragleave', e => { if (!secConf.contains(e.relatedTarget)) secConf.classList.remove('cf-arrastando'); });
+secConf.addEventListener('drop', e => { e.preventDefault(); secConf.classList.remove('cf-arrastando'); lerArquivo(e.dataTransfer.files[0]); });
 
 iniciar();
 })();

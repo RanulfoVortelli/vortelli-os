@@ -48,6 +48,7 @@
     <button data-view="minha" id="navMinha">Minha comissão</button>
     <button data-view="cotas">Cotas</button>
     <button data-view="comissoes" data-gestor>Comissões</button>
+    <button data-view="conferencia" data-gestor>Conferência Disal</button>
     <button data-view="ranking">Ranking</button>
     <button data-view="alertas">2ª parcela <span class="badge" id="badgeAlert">0</span></button>
     <button data-view="financeiro" data-gestor>Financeiro</button>
@@ -146,6 +147,15 @@
     </div>
     <div class="kpis" id="kpisCom" style="margin-bottom:16px"></div>
     <div class="tbl-wrap"><table><thead><tr><th>Pessoa</th><th>Função</th><th>Equipe</th><th class="r">Cotas</th><th class="r">Comissão</th><th class="r">Estornos</th><th class="r">A pagar</th></tr></thead><tbody id="tbCom"></tbody></table></div>
+  </section>
+
+  <section data-page="conferencia" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Toda segunda-feira</span><h1>Conferência Disal</h1><p class="sub">Suba o relatório "Comissões a pagar" da Disal. O sistema confere contrato por contrato, mostra o que vai mudar e só grava quando você clicar em Aplicar.</p></div>
+      <label class="btn gold" for="cfArquivo" style="cursor:pointer">Subir relatório da Disal<input type="file" id="cfArquivo" accept=".xlsx,.xls" hidden></label>
+    </div>
+    <div id="cfConteudo"></div>
+    <div class="panel" style="margin-top:16px"><div class="panel-head"><h2>Relatórios já conferidos</h2><span class="note">clique em Abrir para rever ou gerar de novo o PDF da representação</span></div><div id="cfHist"></div></div>
   </section>
 
   <section data-page="alertas" hidden>

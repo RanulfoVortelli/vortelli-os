@@ -419,9 +419,64 @@ async function convidar(p, email) {
   if (error) return toast(/rate/i.test(error.message) ? 'Limite de e-mails por hora atingido. O e-mail foi salvo; reenvie o convite mais tarde.' : 'Não foi possível enviar: ' + error.message);
   toast('Convite enviado para ' + email);
 }
+/* ---------------- Ranking e desempenho ---------------- */
+function statsVendedor(id, ym) {
+  const v = COTAS.filter(c => valida(c) && c.vendedor_id === id && noMes(c.venda, ym));
+  const canc = COTAS.filter(c => c.status === 'cancelada' && c.vendedor_id === id && noMes(c.venda, ym)).length;
+  const cred = v.reduce((s, c) => s + c.credito, 0);
+  const decid = v.filter(c => c.p[2] === 'pago' || c.p[2] === 'nao_pago');
+  const pagas = decid.filter(c => c.p[2] === 'pago').length;
+  const ant = [1, 2, 3].map(i => COTAS.filter(c => valida(c) && c.vendedor_id === id && noMes(c.venda, ym - i)).length);
+  return { n: v.length, cred, ticket: v.length ? cred / v.length : 0, decid: decid.length, pagas, est: decid.length - pagas, canc, media3: (ant[0] + ant[1] + ant[2]) / 3 };
+}
+function renderRanking() {
+  if (!$('rkMes').value) return;
+  const ym = +$('rkMes').value;
+  const meta = r('meta_cotas') || 0, times = EQUIPES.filter(e => e.nome !== 'Administrativo'), metaEq = Math.round(meta / (times.length || 1));
+  const vendasMes = COTAS.filter(c => valida(c) && noMes(c.venda, ym));
+  const ids = new Set(PESSOAS.filter(p => p.ativo && p.funcao === 'vendedor').map(p => p.id));
+  vendasMes.forEach(c => c.vendedor_id && ids.add(c.vendedor_id));
+  const lista = [...ids].map(id => ({ p: pessoaPorId(id) || { nome: '—' }, ...statsVendedor(id, ym) }))
+    .sort((a, b) => b.n - a.n || b.cred - a.cred || a.p.nome.localeCompare(b.p.nome));
+  // Supervisor do mês: equipe com mais cotas
+  const eqs = times.map(e => { const v = vendasMes.filter(c => c.equipe === e.nome); const sup = PESSOAS.find(p => p.equipe_id === e.id && p.funcao === 'gerente' && p.ativo); return { e, sup, n: v.length, cred: v.reduce((s, c) => s + c.credito, 0) }; })
+    .sort((a, b) => b.n - a.n || b.cred - a.cred);
+  const top = lista.filter(x => x.n > 0).slice(0, 3);
+  const medal = (x, i) => `<div class="medal ${i === 0 ? 'p1' : ''}"><span class="pos">${i + 1}º lugar</span><span class="nm">${esc(x.p.nome)}</span><span class="st">${esc(equipeNome(x.p.equipe_id))}</span><span class="big">${x.n} <span style="font-size:14px;color:var(--muted)">cotas</span></span><span class="st">${brl(x.cred)} em crédito</span></div>`;
+  const s0 = eqs[0];
+  $('podio').innerHTML = (top.length ? top.map(medal).join('') : '<div class="medal"><span class="st">Nenhuma venda neste mês.</span></div>') +
+    (s0 && s0.n ? `<div class="medal sup"><span class="pos">Supervisor do mês</span><span class="nm">${esc(s0.sup ? s0.sup.nome : '—')}</span><span class="st">Equipe ${esc(s0.e.nome)}</span><span class="big">${s0.n} <span style="font-size:14px;color:var(--muted)">cotas</span></span><span class="st">${brl(s0.cred)} em crédito</span></div>` : '');
+  const cred = vendasMes.reduce((s, c) => s + c.credito, 0);
+  const decid = vendasMes.filter(c => c.p[2] === 'pago' || c.p[2] === 'nao_pago'), pagas = decid.filter(c => c.p[2] === 'pago').length;
+  const ativos = lista.filter(x => x.n > 0).length;
+  const ggMin = r('gg_min_cotas') || 80;
+  $('kpisRank').innerHTML =
+    kpi('Cotas da loja', `${vendasMes.length} <span style="font-size:14px;color:var(--muted)">/ ${meta}</span>`, `${meta ? Math.round(vendasMes.length / meta * 100) : 0}% da meta`, `<div class="meter"><i style="width:${Math.min(100, meta ? vendasMes.length / meta * 100 : 0)}%"></i></div>`) +
+    kpi('Crédito vendido', brl(cred), `Ticket médio ${brl(vendasMes.length ? cred / vendasMes.length : 0)}`) +
+    kpi('2ª parcela paga', decid.length ? `${Math.round(pagas / decid.length * 100)}%` : '—', decid.length ? `${pagas} de ${decid.length} com a 2ª já vencida` : 'Nenhuma 2ª vencida ainda') +
+    kpi('Vendedores que venderam', `${ativos} <span style="font-size:14px;color:var(--muted)">/ ${lista.length}</span>`, vendasMes.length >= ggMin ? `Bônus do gerente geral garantido (${ggMin}+)` : `Faltam ${ggMin - vendasMes.length} cotas para o bônus do gerente geral`);
+  $('rkMetaEq').textContent = `meta de ${metaEq} cotas por equipe`;
+  $('rkEquipes').innerHTML = eqs.map((x, i) => `<div class="row"><div class="l" style="flex:1"><strong>${i + 1}º ${esc(x.e.nome)}</strong><span>${esc(x.sup ? x.sup.nome : 'sem supervisor')} · ${brl(x.cred)}</span><div class="meter" style="margin-top:6px"><i style="width:${Math.min(100, metaEq ? x.n / metaEq * 100 : 0)}%"></i></div></div><b>${x.n} / ${metaEq}</b></div>`).join('');
+  const fech = {}; vendasMes.forEach(c => { if (!c.fechador_id) return; const f = fech[c.fechador_id] ||= { n: 0, cred: 0, outra: 0 }; f.n++; f.cred += c.credito; const pv = pessoaPorId(c.vendedor_id), pf = pessoaPorId(c.fechador_id); if (pv && pf && pv.equipe_id !== pf.equipe_id) f.outra++; });
+  const fl = Object.entries(fech).sort((a, b) => b[1].n - a[1].n || b[1].cred - a[1].cred);
+  $('rkFech').innerHTML = fl.length ? fl.map(([id, f], i) => `<div class="row"><div class="l">${i + 1}º ${esc(nomeP(id))}<span>${brl(f.cred)}${f.outra ? ` · ${f.outra} de outra equipe` : ''}</span></div><b>${f.n} ${f.n === 1 ? 'fechada' : 'fechadas'}</b></div>`).join('') : '<p class="note">Nenhuma venda fechada neste mês.</p>';
+  const meses = [5, 4, 3, 2, 1, 0].map(i => ym - i);
+  const cont = (eNome, m) => COTAS.filter(c => valida(c) && c.equipe === eNome && noMes(c.venda, m)).length;
+  const maxC = Math.max(1, ...times.flatMap(e => meses.map(m => cont(e.nome, m))));
+  const cel = n => `<span class="heat" style="background:color-mix(in srgb, var(--celeste) ${Math.round(n / maxC * 55)}%, transparent)">${n}</span>`;
+  $('rkEvol').innerHTML = `<thead><tr><th>Equipe</th>${meses.map(m => `<th class="r">${ymLabel(m)}</th>`).join('')}</tr></thead><tbody>` +
+    times.map(e => `<tr><td>${esc(e.nome)}</td>${meses.map(m => `<td class="r">${cel(cont(e.nome, m))}</td>`).join('')}</tr>`).join('') +
+    `<tr class="total"><td>Loja</td>${meses.map(m => `<td class="r n">${COTAS.filter(c => valida(c) && noMes(c.venda, m)).length}</td>`).join('')}</tr></tbody>`;
+  $('tbRank').innerHTML = lista.map((x, i) => {
+    const tend = x.media3 ? (x.n - x.media3) / x.media3 : (x.n ? 1 : 0);
+    const tTxt = !x.media3 && !x.n ? '—' : `<span class="${tend > 0.05 ? 'trend-up' : tend < -0.05 ? 'trend-down' : ''}">${tend > 0.05 ? '▲' : tend < -0.05 ? '▼' : '='} ${x.media3 ? Math.round(tend * 100) + '%' : 'novo'}</span>`;
+    return `<tr><td class="n">${x.n ? i + 1 : '—'}</td><td>${esc(x.p.nome)}${x.p.funcao === 'gerente' ? ' <span class="chip c-aberto">Supervisor</span>' : ''}</td><td>${esc(equipeNome(x.p.equipe_id))}</td><td class="r n"><strong>${x.n}</strong></td><td class="r n">${brl(x.cred)}</td><td class="r n">${x.n ? brl(x.ticket) : '—'}</td><td class="r n">${x.media3.toFixed(1).replace('.', ',')}</td><td class="r n">${tTxt}</td><td class="r n">${x.decid ? `${Math.round(x.pagas / x.decid * 100)}% <span style="color:var(--muted)">(${x.pagas}/${x.decid})</span>` : '—'}</td><td class="r n ${x.est ? 'neg' : ''}">${x.est || '—'}</td><td class="r n">${x.canc || '—'}</td></tr>`;
+  }).join('');
+}
 function initFiltros() {
   const yms = [...new Set(COTAS.map(c => ymOf(c.venda)).concat([ymNow]))].sort((a, b) => b - a);
   $('qMes').innerHTML = yms.map(ym => `<option value="${ym}">${ymLabel(ym)}</option>`).join('');
+  const rk = $('rkMes').value; $('rkMes').innerHTML = yms.map(ym => `<option value="${ym}">${ymLabel(ym)}</option>`).join(''); $('rkMes').value = rk || ymNow; if (!$('rkMes').value) $('rkMes').value = yms[0];
   $('qEquipe').innerHTML = '<option value="">Todas</option>' + EQUIPES.filter(e => e.nome !== 'Administrativo').map(e => `<option>${esc(e.nome)}</option>`).join('');
   const sextas = []; let s = addDays(sextaApos(addDays(TODAY, -1)), 7); for (let i = 0; i < 10; i++) { sextas.push(s); s = addDays(s, -7); }
   $('qSexta').innerHTML = sextas.map((d, i) => `<option value="${+d}">${d.toLocaleDateString('pt-BR')}${+d === +sextaApos(addDays(TODAY, -1)) ? ' (esta semana)' : i === 0 ? ' (previsão)' : ''}</option>`).join('');
@@ -432,7 +487,7 @@ function initFiltros() {
   $('fAdm').innerHTML = '<option value="">Sem carteira</option>' + opt(ativos.filter(p => ['administrativo', 'gerente_adm'].includes(p.funcao)));
   $('fData').value = iso(TODAY); $('lData').value = iso(TODAY);
 }
-function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); renderUsuarios(); }
+function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); renderUsuarios(); renderRanking(); }
 function go(view) {
   document.querySelectorAll('[data-page]').forEach(s => s.hidden = s.dataset.page !== view);
   document.querySelectorAll('#nav button').forEach(b => { if (b.dataset.view === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
@@ -476,6 +531,7 @@ document.addEventListener('click', async e => {
 });
 ['qMes', 'qEquipe', 'qBusca', 'qSit'].forEach(id => $(id).addEventListener('input', renderCotas));
 $('qSexta').addEventListener('change', renderComissoes);
+$('rkMes').addEventListener('change', renderRanking);
 function abrirForm(c) {
   const f = $('formCota'); f.reset(); initFiltros();
   $('fId').value = c ? c.id : '';

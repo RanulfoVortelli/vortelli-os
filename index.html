@@ -47,6 +47,7 @@
     <button data-view="painel" data-gestor>Painel</button>
     <button data-view="cotas">Cotas</button>
     <button data-view="comissoes">Comissões</button>
+    <button data-view="ranking">Ranking</button>
     <button data-view="alertas">2ª parcela <span class="badge" id="badgeAlert">0</span></button>
     <button data-view="financeiro" data-gestor>Financeiro</button>
     <button data-view="equipes">Equipes</button>
@@ -158,6 +159,22 @@
       <div><button class="btn gold" type="submit">Lançar</button></div>
     </form>
     <div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Origem</th><th class="r">Valor</th></tr></thead><tbody id="tbFin"></tbody></table></div>
+  </section>
+
+  <section data-page="ranking" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Desempenho</span><h1>Ranking</h1><p class="sub" id="subRank">Critério: cotas válidas no mês (canceladas não contam). Empate: maior crédito vendido.</p></div>
+      <div class="toolbar"><label for="rkMes">Mês<select id="rkMes"></select></label></div>
+    </div>
+    <div class="podio" id="podio"></div>
+    <div class="kpis" id="kpisRank" style="margin:16px 0"></div>
+    <div class="grid2" style="margin-bottom:16px">
+      <div class="panel"><div class="panel-head"><h2>Equipes</h2><span class="note" id="rkMetaEq"></span></div><div class="list" id="rkEquipes"></div></div>
+      <div class="panel"><div class="panel-head"><h2>Fechadores</h2><span class="note">vendas fechadas no mês</span></div><div class="list" id="rkFech"></div></div>
+    </div>
+    <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Evolução por equipe</h2><span class="note">cotas por mês</span></div><div class="tbl-wrap" style="border:0"><table id="rkEvol"></table></div></div>
+    <div class="panel-head" style="margin:8px 0"><h2>Todos os vendedores</h2><span class="note">2ª paga e estornos contam só as vendas do mês cuja 2ª parcela já venceu</span></div>
+    <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Vendedor</th><th>Equipe</th><th class="r">Cotas</th><th class="r">Crédito</th><th class="r">Ticket médio</th><th class="r">Média 3 meses</th><th class="r">Tendência</th><th class="r">2ª paga</th><th class="r">Estornos</th><th class="r">Canceladas</th></tr></thead><tbody id="tbRank"></tbody></table></div>
   </section>
 
   <section data-page="equipes" hidden>

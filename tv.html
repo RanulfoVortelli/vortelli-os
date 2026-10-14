@@ -18,6 +18,8 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 [hidden]{display:none!important}
+body.embed .music,body.embed .fs{display:none!important}
+body.embed .side{grid-template-rows:auto auto}
 html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--f-b)}
 body{background:radial-gradient(1200px 700px at 15% -10%,#14305E 0%,transparent 60%),radial-gradient(900px 600px at 110% 110%,#2A1E07 0%,transparent 55%),var(--bg)}
 body.idle{cursor:none}
@@ -188,6 +190,7 @@ body.idle .fs{opacity:0}
 <script>
 (() => {
 const $ = id => document.getElementById(id);
+if (new URLSearchParams(location.search).has('embed')) document.body.classList.add('embed');
 const cfg = window.VORTELLI_CONFIG;
 const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];

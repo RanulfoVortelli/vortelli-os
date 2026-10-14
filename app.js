@@ -136,11 +136,19 @@ function montarCota(c, contatos) {
     id: c.id, contrato: c.contrato, cliente: c.cliente, telefone: c.telefone, credito: Number(c.credito || 0), parcela: Number(c.parcela_valor || 0),
     venda: parseD(c.data_venda), venc, p, status: c.status, estornoDoc: c.estorno_documento, recuperacao: parseD(c.recuperacao_data), equipeId: c.equipe_id,
     vendedor_id: c.vendedor_id, fechador_id: c.fechador_id, adm_id: c.adm_id,
+    cpf: c.cpf, grupo: c.grupo, cotaNum: c.cota, venc1: c.vencimento_1, login: c.login_disal,
+    confirmada: c.disal_confirmada !== false, confirmadaEm: parseD(c.disal_confirmada_em) || parseD(c.data_venda),
     vendedor: nomeP(c.vendedor_id), fechador: nomeP(c.fechador_id), adm: c.adm_id ? nomeP(c.adm_id) : 'Sem carteira',
     equipe: equipeNome(c.equipe_id || (pessoaPorId(c.vendedor_id) || {}).equipe_id), contato: contatos.has(c.id)
   };
 }
 const valida = c => c.status !== 'cancelada' && c.credito > 0;
+const incompleta = c => valida(c) && (!c.contrato || !c.adm_id);
+// Base da comissão da venda: a data em que a Disal confirmou (ou a venda, se confirmou antes)
+const baseVenda = c => c.confirmadaEm && c.confirmadaEm > c.venda ? c.confirmadaEm : c.venda;
+const soDig = s => String(s || '').replace(/\D/g, '');
+const fmtCpf = s => { const d = soDig(s); return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : (s || ''); };
+const podeLancar = () => GESTOR || (ME && ['gerente', 'administrativo'].includes(ME.funcao));
 const venc = (c, k) => c.venc[k] || addDays(c.venda, 30 * (k - 1));
 // Status mostrado: parcela vencida há mais de 3 dias sem baixa aparece como "atrasado"
 const stView = (c, k) => (c.p[k] === 'aberto' && venc(c, k) < addDays(TODAY, -3)) ? 'atrasado' : c.p[k];
@@ -149,7 +157,7 @@ const stView = (c, k) => (c.p[k] === 'aberto' && venc(c, k) < addDays(TODAY, -3)
 function eventosLoja(c) {
   if (!valida(c)) return [];
   const ev = [{ data: c.venda, tipo: 'entrada', valor: r('entrada') - c.parcela },
-              { data: c.venda, tipo: 'disal', valor: c.credito * r('disal_venda') / 100 }];
+              { data: baseVenda(c), tipo: 'disal', valor: c.credito * r('disal_venda') / 100, previsto: !c.confirmada }];
   for (let k = 3; k <= 5; k++) {
     if (c.p[k] === 'pago') ev.push({ data: venc(c, k), tipo: 'disal', valor: c.credito * r('disal_p345') / 100 });
     else if (c.p[k] === 'aberto') ev.push({ data: venc(c, k), tipo: 'disal', valor: c.credito * r('disal_p345') / 100, previsto: true });
@@ -191,8 +199,9 @@ const ativoEm = (id, d) => { const p = pessoaPorId(id); return !(p && p.data_sai
 function eventosEquipe(c) {
   if (!valida(c)) return [];
   const ev = [];
+  if (!c.confirmada) return ev;   // Política: comissão só depois que a venda sai paga no relatório da Disal
   const { partes } = partesVenda(c);
-  partes.forEach(x => ev.push({ pessoa: x.pessoa, papel: x.papel, data: c.venda, valor: x.valor, tipo: 'com', cota: c }));
+  partes.forEach(x => ev.push({ pessoa: x.pessoa, papel: x.papel, data: baseVenda(c), valor: x.valor, tipo: 'com', cota: c }));
   // Estorno de 50% quando a 2ª não é paga (não vale para estorno por documento)
   if (c.p[2] === 'nao_pago' && !c.estornoDoc) {
     const d = addDays(venc(c, 2), 5), f = r('estorno_equipe') / 100;
@@ -280,12 +289,14 @@ function renderPainel() {
   const prox = sextaApos(addDays(TODAY, -1));
   const aPagar = todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +prox).reduce((s, e) => s + e.valor, 0);
   const semCarteira = COTAS.filter(c => valida(c) && !c.adm_id && c.p[5] !== 'pago').length;
+  const aguard = COTAS.filter(c => valida(c) && !c.confirmada).length;
   const pend = Object.values(R).filter(x => x.pendente).length;
   $('atencao').innerHTML = [
     [`${atras} clientes com a 2ª vencida sem baixa`, 'Ligar hoje antes do estorno', 'alertas'],
     [`${al.length - atras} clientes com a 2ª vencendo em 15 dias`, 'Contato preventivo do administrativo', 'alertas'],
     [`Pagamento da sexta ${fdate(prox)}: ${brl(aPagar)}`, 'Conferir antes de liberar', 'comissoes'],
     [`Salários do dia ${fdate(proxFolha())}: ${brl(folhaTotal() / 2)}`, `${PESSOAS.filter(p => salarioDe(p) > 0).length} pessoas com salário fixo`, 'equipes'],
+    [`${aguard} vendas aguardando a Disal`, 'Comissão liberada quando a venda sair paga no relatório', 'cotas'],
     [`${semCarteira} cotas ativas sem administrativo`, 'Definir a carteira de cada uma (base dos 0,05%)', 'cotas'],
     [`${pend} regras aguardando confirmação`, 'Vendedor e fechador fixo', 'regras']
   ].map(([t, s, v]) => `<div class="row"><div class="l">${t}<span>${s}</span></div><button class="btn ghost sm" data-go="${v}">Abrir</button></div>`).join('');
@@ -301,11 +312,14 @@ function chipSit(c) {
 }
 const podeBaixar = () => GESTOR || (ME && ME.funcao === 'administrativo');
 function renderCotas() {
-  const ym = +$('qMes').value, eq = $('qEquipe').value, q = $('qBusca').value.trim().toLowerCase();
-  const rows = COTAS.filter(c => noMes(c.venda, ym) && (!eq || c.equipe === eq) && (!q || `${c.cliente} ${c.vendedor} ${c.contrato || ''}`.toLowerCase().includes(q)));
+  const ym = +$('qMes').value, eq = $('qEquipe').value, q = $('qBusca').value.trim().toLowerCase(), sit = $('qSit').value;
+  const qd = soDig(q);
+  const rows = COTAS.filter(c => (sit || q ? true : noMes(c.venda, ym)) && (!eq || c.equipe === eq)
+    && (!sit || (sit === 'disal' ? valida(c) && !c.confirmada : incompleta(c)))
+    && (!q || `${c.cliente} ${c.vendedor} ${c.contrato || ''}`.toLowerCase().includes(q) || (qd.length >= 3 && soDig(c.cpf).includes(qd))));
   $('tbCotas').innerHTML = rows.length ? rows.map(c => `<tr><td class="n">${fdate(c.venda)}</td><td class="n">${esc(c.contrato || '—')}</td><td>${esc(c.cliente)}</td><td class="r n">${c.credito ? brl(c.credito) : '—'}</td><td>${esc(c.vendedor)}</td><td>${esc(c.fechador)}</td><td>${esc(c.adm)}</td>
-    <td><span class="pp">${[1, 2, 3, 4, 5].map(k => { const s = stView(c, k); const t = `${k}ª: ${s} · venc. ${fdate(venc(c, k))}`; return k > 1 && podeBaixar() && c.status !== 'cancelada' ? `<button data-parc="${c.id}:${k}" title="${t}" aria-label="${t}"><i class="s-${s}">${k}</i></button>` : `<i class="s-${s}" title="${t}">${k}</i>`; }).join('')}</span></td><td>${chipSit(c)}</td></tr>`).join('')
-    : `<tr><td colspan="9" class="empty">Nenhuma cota neste filtro.</td></tr>`;
+    <td><span class="pp">${[1, 2, 3, 4, 5].map(k => { const s = stView(c, k); const t = `${k}ª: ${s} · venc. ${fdate(venc(c, k))}`; return k > 1 && podeBaixar() && c.status !== 'cancelada' ? `<button data-parc="${c.id}:${k}" title="${t}" aria-label="${t}"><i class="s-${s}">${k}</i></button>` : `<i class="s-${s}" title="${t}">${k}</i>`; }).join('')}</span></td><td>${chipSit(c)}${valida(c) && !c.confirmada ? ' <span class="chip c-atrasado">Aguardando Disal</span>' : ''}${incompleta(c) ? ' <span class="chip c-aberto">Completar dados</span>' : ''}</td><td>${podeLancar() ? `<button class="btn ghost sm" data-editar="${c.id}">Editar</button>` : ''}</td></tr>`).join('')
+    : `<tr><td colspan="10" class="empty">Nenhuma cota neste filtro.</td></tr>`;
 }
 
 function renderComissoes() {
@@ -460,24 +474,70 @@ document.addEventListener('click', async e => {
     await salvarParcela(c, k, ciclo[(ciclo.indexOf(c.p[k]) + 1) % ciclo.length]);
   }
 });
-['qMes', 'qEquipe', 'qBusca'].forEach(id => $(id).addEventListener('input', renderCotas));
+['qMes', 'qEquipe', 'qBusca', 'qSit'].forEach(id => $(id).addEventListener('input', renderCotas));
 $('qSexta').addEventListener('change', renderComissoes);
-$('btnNova').addEventListener('click', () => { $('formCota').hidden = false; $('fCliente').focus(); });
+function abrirForm(c) {
+  const f = $('formCota'); f.reset(); initFiltros();
+  $('fId').value = c ? c.id : '';
+  $('fTitulo').textContent = c ? `Editar venda · ${c.cliente}` : 'Cadastrar venda';
+  $('lStatus').hidden = !c; $('btnConfirmarDisal').hidden = !(c && GESTOR && !c.confirmada);
+  $('fDisalInfo').hidden = !c;
+  if (c) {
+    const garante = (sel, id) => { if (id && !$(sel).querySelector(`option[value="${id}"]`)) $(sel).insertAdjacentHTML('beforeend', `<option value="${id}">${esc(nomeP(id))} (inativo)</option>`); };
+    garante('fVend', c.vendedor_id); garante('fFech', c.fechador_id); garante('fAdm', c.adm_id);
+    $('fCliente').value = c.cliente || ''; $('fCpf').value = fmtCpf(c.cpf); $('fTel').value = c.telefone || '';
+    $('fCredito').value = c.credito || ''; $('fParc').value = c.parcela || ''; $('fData').value = iso(c.venda);
+    $('fVend').value = c.vendedor_id || ''; $('fFech').value = c.fechador_id || c.vendedor_id || '';
+    $('fContrato').value = c.contrato || ''; $('fGrupo').value = c.grupo || ''; $('fCotaN').value = c.cotaNum || '';
+    $('fVenc').value = c.venc1 || ''; if (c.login) $('fLogin').value = c.login; $('fAdm').value = c.adm_id || '';
+    $('fStatus').value = c.status === 'cancelada' ? 'cancelada' : 'ativa';
+    $('fCpf').required = false; $('fTel').required = false;
+    $('fDisalInfo').textContent = c.confirmada ? `Confirmada na Disal em ${fdate(c.confirmadaEm)}. Comissão liberada.` : 'Aguardando aparecer paga no relatório da Disal. Comissão ainda não liberada.';
+  } else { $('fCpf').required = true; $('fTel').required = true; }
+  f.hidden = false; f.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('fCliente').focus();
+}
+$('btnNova').addEventListener('click', () => abrirForm(null));
 $('btnCancelar').addEventListener('click', () => { $('formCota').hidden = true; });
+document.addEventListener('click', e => { const b = e.target.closest('[data-editar]'); if (b) abrirForm(COTAS.find(c => c.id === +b.dataset.editar)); });
+$('fCpf').addEventListener('blur', () => { $('fCpf').value = fmtCpf($('fCpf').value); });
+$('btnConfirmarDisal').addEventListener('click', async () => {
+  const c = COTAS.find(x => x.id === +$('fId').value); if (!c) return;
+  const { error } = await sb.from('cotas').update({ disal_confirmada: true, disal_confirmada_em: iso(TODAY) }).eq('id', c.id);
+  if (error) return toast('Não foi possível confirmar: ' + error.message);
+  c.confirmada = true; c.confirmadaEm = TODAY; $('formCota').hidden = true; toast('Venda confirmada na Disal. Comissão liberada.'); renderAll();
+});
 $('fCredito').addEventListener('input', () => { $('fParc').value = ((+$('fCredito').value || 0) * 0.011781).toFixed(2); });
 $('formCota').addEventListener('submit', async ev => {
   ev.preventDefault();
-  const vend = pessoaPorId($('fVend').value);
+  const vend = pessoaPorId($('fVend').value), id = +$('fId').value || null;
+  const cpf = soDig($('fCpf').value);
+  if (cpf && cpf.length !== 11) return toast('CPF precisa ter 11 números');
+  const contrato = $('fContrato').value.trim() || null;
+  if (contrato && COTAS.some(c => c.contrato === contrato && c.id !== id)) return toast('Esse contrato já está cadastrado em outra cota');
   const row = {
-    cliente: $('fCliente').value.trim(), telefone: $('fTel').value.trim() || null, credito: +$('fCredito').value, parcela_valor: +$('fParc').value,
-    data_venda: $('fData').value, vencimento_1: $('fVenc').value || $('fData').value, contrato: $('fContrato').value.trim() || null,
+    cliente: $('fCliente').value.trim(), cpf: cpf || null, telefone: $('fTel').value.trim() || null, credito: +$('fCredito').value, parcela_valor: +$('fParc').value || null,
+    data_venda: $('fData').value, vencimento_1: $('fVenc').value || $('fData').value, contrato, grupo: $('fGrupo').value.trim() || null, cota: $('fCotaN').value.trim() || null,
     login_disal: $('fLogin').value, vendedor_id: vend.id, fechador_id: $('fFech').value, adm_id: $('fAdm').value || null, equipe_id: vend.equipe_id
   };
+  if (id) {
+    const antes = COTAS.find(c => c.id === id);
+    const st = $('fStatus').value === 'cancelada' ? 'cancelada' : (antes.status === 'cancelada' ? 'ativa' : antes.status);
+    const { data, error } = await sb.from('cotas').update({ ...row, status: st }).eq('id', id).select('*, parcelas(*)').single();
+    if (error) return toast('Não foi possível salvar: ' + error.message);
+    if ((antes.venc1 || '') !== row.vencimento_1 && podeBaixar()) {
+      const b = parseD(row.vencimento_1);
+      for (let n = 1; n <= 5; n++) await sb.from('parcelas').update({ vencimento: iso(new Date(b.getFullYear(), b.getMonth() + n - 1, b.getDate())) }).eq('cota_id', id).eq('numero', n);
+      const { data: d2 } = await sb.from('cotas').select('*, parcelas(*)').eq('id', id).single(); if (d2) Object.assign(data, d2);
+    }
+    const novo = montarCota(data, new Set(antes.contato ? [id] : []));
+    COTAS[COTAS.indexOf(antes)] = novo; COTAS.sort((a, b) => b.venda - a.venda);
+    $('formCota').hidden = true; toast('Venda atualizada'); renderAll(); return;
+  }
   const { data, error } = await sb.from('cotas').insert(row).select('*, parcelas(*)').single();
   if (error) return toast('Não foi possível salvar: ' + error.message);
   COTAS.unshift(montarCota(data, new Set())); COTAS.sort((a, b) => b.venda - a.venda);
   $('formCota').reset(); $('formCota').hidden = true; initFiltros(); $('qMes').value = ymOf(parseD(row.data_venda));
-  toast('Cota lançada'); renderAll();
+  toast('Venda cadastrada. Aguardando a Disal para liberar a comissão.'); renderAll();
 });
 $('formLanc').addEventListener('submit', async ev => {
   ev.preventDefault();

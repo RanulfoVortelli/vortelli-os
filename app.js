@@ -41,7 +41,7 @@ const proxFolha = () => { const y = TODAY.getFullYear(), m = TODAY.getMonth(); r
 const pessoaPorId = id => PESSOAS.find(p => p.id === id);
 const nomeP = id => (pessoaPorId(id) || {}).nome || '—';
 const equipeNome = id => (EQUIPES.find(e => e.id === id) || {}).nome || '—';
-const FUNCAO = {ceo:'CEO', gerente:'Supervisor', vendedor:'Vendedor', gerente_adm:'Gerente adm', administrativo:'Administrativo'};
+const FUNCAO = {tv:'TV da loja', ceo:'CEO', gerente:'Supervisor', vendedor:'Vendedor', gerente_adm:'Gerente adm', administrativo:'Administrativo'};
 
 /* ---------------- Login ---------------- */
 async function iniciar() {
@@ -102,6 +102,7 @@ async function carregar(user) {
     let { data: eu } = await sb.from('pessoas').select('*').eq('user_id', user.id).maybeSingle();
     if (!eu) { await sb.rpc('vincular_meu_login'); ({ data: eu } = await sb.from('pessoas').select('*').eq('user_id', user.id).maybeSingle()); }
     if (!eu) { await sb.auth.signOut(); mostrarLogin(`O e-mail ${user.email} não está cadastrado no Vortelli OS. Peça ao administrativo para cadastrar.`); return; }
+    if (eu.funcao === 'tv') { location.replace('tv.html'); return; }   // login da TV: só o ranking
     ME = eu; GESTOR = ['ceo', 'gerente_adm'].includes(eu.funcao);
     const [eq, ps, rg, ct, lc, cn] = await Promise.all([
       sb.from('equipes').select('*').order('id'),

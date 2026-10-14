@@ -171,18 +171,15 @@ const equipeDe = c => { const id = c.equipe_id || (pessoa(c.vendedor_id) || {}).
 const corEq = e => e ? (CORES[(e.nome || '').toUpperCase()] || '#8C9BB8') : '#8C9BB8';
 const valida = c => c.status !== 'cancelada' && Number(c.credito) > 0;
 
+// Uma única consulta com o mínimo do ranking (função tv_dados no banco): sem cliente, CPF, salário ou comissão
 async function base() {
-  const [ps, eq, rg] = await Promise.all([sb.from('pessoas').select('id,nome,funcao,equipe_id,ativo'), sb.from('equipes').select('*').order('id'), sb.from('regras').select('chave,valor')]);
-  if (ps.error) throw ps.error;
-  PESSOAS = ps.data || []; EQUIPES = (eq.data || []).filter(e => e.nome !== 'Administrativo');
-  R = Object.fromEntries((rg.data || []).map(x => [x.chave, Number(x.valor)]));
-}
-async function cotasDoMes() {
-  const h = new Date(), ini = iso(new Date(h.getFullYear(), h.getMonth(), 1));
-  const { data, error } = await sb.from('cotas').select('id,data_venda,credito,status,vendedor_id,fechador_id,equipe_id,created_at').gte('data_venda', ini).order('created_at', { ascending: false }).limit(1000);
+  const { data, error } = await sb.rpc('tv_dados');
   if (error) throw error;
-  return data || [];
+  PESSOAS = data.pessoas || []; EQUIPES = (data.equipes || []).filter(e => e.nome !== 'Administrativo');
+  R = Object.fromEntries(Object.entries(data.regras || {}).map(([k, v]) => [k, Number(v)]));
+  return data.cotas || [];
 }
+const cotasDoMes = base;
 
 function render() {
   const hoje = new Date(), ym = hoje.getMonth();

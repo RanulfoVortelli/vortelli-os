@@ -61,12 +61,12 @@ main{display:grid;grid-template-columns:1.55fr 1fr;gap:1.6vw;min-height:0}
 .lane.p1 .num{color:var(--gold2)}
 .more{position:absolute;bottom:0;left:0;right:0;text-align:center;font-size:1.7vh;color:var(--muted)}
 /* Coluna direita */
-.side{display:grid;grid-template-rows:auto auto 1fr;gap:1.6vh;min-height:0}
+.side{display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:1vh;min-height:0}
 .teams{display:grid;grid-template-columns:1fr 1fr;gap:1.2vh 1vw}
 .team{border-radius:1.2vh;padding:1.1vh 1vw;background:linear-gradient(160deg,color-mix(in srgb,var(--tc) 22%,transparent),rgba(255,255,255,.02));border:1px solid color-mix(in srgb,var(--tc) 35%,transparent);display:flex;flex-direction:column;gap:.7vh;position:relative}
 .team .tn{font-family:var(--f-d);font-weight:800;font-size:2.4vh;display:flex;justify-content:space-between;align-items:center}
 .team .sup{font-size:1.5vh;color:var(--muted)}
-.team .tv-n{font-family:var(--f-n);font-weight:700;font-size:4vh;line-height:1}
+.team .tv-n{font-family:var(--f-n);font-weight:700;font-size:3.6vh;line-height:1}
 .team .tv-n small{font-size:2vh;color:var(--muted);font-weight:500}
 .team .bar{height:1.1vh;border-radius:1vh;background:rgba(255,255,255,.08);overflow:hidden}
 .team .bar i{display:block;height:100%;background:var(--tc);width:0;transition:width 1.4s}
@@ -74,19 +74,41 @@ main{display:grid;grid-template-columns:1.55fr 1fr;gap:1.6vw;min-height:0}
 .crown{font-size:2.8vh;animation:bob 2.4s ease-in-out infinite}
 @keyframes bob{50%{transform:translateY(-.5vh)}}
 .meta .big{display:flex;align-items:baseline;gap:1vw}
-.meta .big b{font-family:var(--f-n);font-weight:700;font-size:6.2vh;line-height:1;color:var(--gold2)}
+.meta .big b{font-family:var(--f-n);font-weight:700;font-size:5.4vh;line-height:1;color:var(--gold2)}
 .meta .big span{font-family:var(--f-n);font-size:3vh;color:var(--muted)}
 .mbar{position:relative;height:2.4vh;border-radius:2vh;background:rgba(255,255,255,.07);overflow:visible}
 .mbar i{display:block;height:100%;border-radius:2vh;background:linear-gradient(90deg,#8B6A24,var(--gold),var(--gold2));width:0;transition:width 1.6s}
 .mark{position:absolute;top:-.8vh;bottom:-.8vh;width:.3vh;background:var(--celeste)}
 .mark span{position:absolute;top:-2.6vh;left:50%;transform:translateX(-50%);white-space:nowrap;font-family:var(--f-n);font-size:1.4vh;color:var(--celeste)}
-.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:1vw}
+.facts{display:grid;grid-template-columns:repeat(4,1fr);gap:1vw}
 .fact b{display:block;font-family:var(--f-n);font-weight:700;font-size:2.8vh;white-space:nowrap}
 .fact span{font-size:1.5vh;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-family:var(--f-n)}
-.today{justify-content:center}
-.today .row{display:flex;align-items:center;gap:1.4vw}
-.today .big{font-family:var(--f-n);font-weight:700;font-size:6vh;line-height:1;color:var(--good)}
-.today .sub{font-size:2.1vh;color:var(--ink)}
+/* Música */
+.music{flex-direction:row;align-items:center;gap:1.2vw;padding:0 1.2vw 0 0;min-height:0;overflow:hidden}
+.music:not(.on){padding:1.4vh 1.2vw}
+.music .yt{flex-shrink:0;height:100%;max-height:200px;aspect-ratio:16/9;overflow:hidden;background:#000;display:none}
+.music.on .yt{display:block}
+.music .yt iframe{width:100%;height:100%;border:0;display:block}
+.music .info{min-width:0;flex:1;display:flex;flex-direction:column;gap:.8vh;padding:1vh 0}
+.music .lbl2{font-family:var(--f-n);font-size:1.5vh;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:.6vw}
+.music .eq{display:inline-flex;gap:2px;align-items:flex-end;height:1.6vh}
+.music .eq i{width:3px;background:var(--gold);animation:eq 1s ease-in-out infinite}
+.music .eq i:nth-child(2){animation-delay:.2s}.music .eq i:nth-child(3){animation-delay:.4s}.music .eq i:nth-child(4){animation-delay:.1s}
+.music:not(.tocando) .eq i{animation:none;height:30%}
+@keyframes eq{0%,100%{height:25%}50%{height:100%}}
+.music .tit{font-family:var(--f-d);font-weight:800;font-size:2.3vh;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.music .ctl{display:flex;gap:.6vw;flex-wrap:wrap}
+.music button{font:700 1.6vh var(--f-n);color:var(--ink);background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:.8vh;padding:.6vh .6vw;cursor:pointer}
+.mpanel button{font:700 1.7vh var(--f-n);color:var(--ink);background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:1vh;padding:.8vh .9vw;cursor:pointer}
+.music button.gold,.mpanel button.gold{background:var(--gold);color:#1A1203;border-color:var(--gold)}
+.music .off{font-size:2vh;color:var(--muted)}
+.mpanel{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:rgba(3,7,15,.75)}
+.mpanel .box{width:min(760px,90vw);background:#0E1B36;border:1px solid var(--line);border-radius:1.6vh;padding:3vh 2vw;display:flex;flex-direction:column;gap:1.6vh}
+.mpanel h3{font-family:var(--f-d);font-size:3vh}
+.mpanel p{color:var(--muted);font-size:1.9vh}
+.mpanel input{font:500 2vh var(--f-b);padding:1.4vh 1vw;border-radius:1vh;border:1px solid var(--line);background:#081226;color:var(--ink);width:100%}
+.mpanel .row2{display:flex;gap:.8vw;justify-content:flex-end;flex-wrap:wrap}
+.mpanel .err{color:#FF8A7A;font-size:1.8vh}
 /* Ticker */
 footer{height:6.4vh;margin:0 -2.2vw;border-top:1px solid var(--line);background:rgba(0,0,0,.25);display:flex;align-items:center;overflow:hidden;white-space:nowrap}
 footer .lbl{flex-shrink:0;height:100%;display:flex;align-items:center;padding:0 1.6vw;background:var(--gold);color:#1A1203;font-family:var(--f-d);font-weight:900;font-size:2vh;letter-spacing:.12em}
@@ -108,7 +130,7 @@ canvas#cf{position:fixed;inset:0;z-index:11;pointer-events:none}
 /* Avisos */
 .msg{position:fixed;inset:0;display:grid;place-items:center;text-align:center;padding:4vh;font-size:2.6vh;z-index:20;background:var(--bg)}
 .msg a{color:var(--gold2)}
-.fs{position:fixed;right:1.4vw;bottom:8vh;z-index:5;font:600 1.6vh var(--f-n);color:var(--ink);background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:1vh;padding:1vh 1vw;cursor:pointer;transition:opacity .6s}
+.fs{position:fixed;right:13vw;top:2.6vh;z-index:5;font:600 1.6vh var(--f-n);color:var(--ink);background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:1vh;padding:1vh 1vw;cursor:pointer;transition:opacity .6s}
 body.idle .fs{opacity:0}
 </style>
 </head>
@@ -134,13 +156,18 @@ body.idle .fs{opacity:0}
         <div class="mbar"><i id="lojaBar"></i><div class="mark" id="ggMark"><span>bônus 80</span></div></div>
         <div class="facts" style="margin-top:1vh">
           <div class="fact"><b id="faltam">0</b><span>faltam</span></div>
-          <div class="fact"><b id="ritmo">0</b><span>por dia p/ bater</span></div>
+          <div class="fact"><b id="ritmo">0</b><span>por dia</span></div>
           <div class="fact"><b id="credito">R$ 0</b><span>em crédito</span></div>
+          <div class="fact"><b id="hojeN" style="color:var(--good)">0</b><span id="hojeSub">vendas hoje</span></div>
         </div>
       </section>
-      <section class="card today">
-        <h2><span>Hoje</span><em id="hojeData"></em></h2>
-        <div class="row"><div class="big" id="hojeN">0</div><div class="sub" id="hojeSub">vendas hoje</div></div>
+      <section class="card music" id="music">
+        <div class="yt"><div id="ytPlayer"></div></div>
+        <div class="info">
+          <div class="lbl2"><span class="eq"><i></i><i></i><i></i><i></i></span><span id="mEstado">Música da loja</span></div>
+          <div class="tit" id="mTitulo"><span class="off">Nenhuma música tocando.</span></div>
+          <div class="ctl" id="mCtl"><button class="gold" type="button" id="mAbrir">🎵 Escolher música</button></div>
+        </div>
       </section>
     </div>
   </main>
@@ -148,6 +175,13 @@ body.idle .fs{opacity:0}
 </div>
 <div class="party" id="party"><div class="box"><div class="k">NOVA VENDA!</div><div class="n" id="pN"></div><div class="t" id="pT"></div><div class="v" id="pV"></div><div class="r" id="pR"></div></div></div>
 <canvas id="cf"></canvas>
+<div class="mpanel" id="mPanel" hidden><div class="box">
+  <h3>🎵 Música na TV</h3>
+  <p>Cole o link de uma música ou playlist do YouTube. Ela toca sem parar e abaixa sozinha quando entra uma venda nova.</p>
+  <input id="mLink" placeholder="https://www.youtube.com/watch?v=...  ou  link de playlist" autocomplete="off">
+  <div class="err" id="mErr"></div>
+  <div class="row2"><button type="button" id="mParar">Parar música</button><button type="button" id="mFechar">Cancelar</button><button class="gold" type="button" id="mTocar">▶ Tocar</button></div>
+</div></div>
 <button class="fs" id="btnFs" type="button">Tela cheia (F)</button>
 <div class="msg" id="msg">Carregando o ranking…</div>
 
@@ -234,9 +268,8 @@ function render() {
   $('credito').textContent = brlK(cred);
   // Hoje
   const vh = v.filter(c => c.data_venda === iso(hoje));
-  $('hojeData').textContent = hoje.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
   $('hojeN').textContent = vh.length;
-  $('hojeSub').textContent = vh.length ? `${vh.length === 1 ? 'venda' : 'vendas'} hoje · ${brlK(vh.reduce((s, c) => s + Number(c.credito), 0))}` : 'Ainda sem vendas hoje. Bora abrir o dia!';
+  $('hojeSub').textContent = vh.length === 1 ? 'venda hoje' : 'vendas hoje';
   // Ticker
   const ult = v.slice().sort((a, b) => (b.data_venda + b.created_at).localeCompare(a.data_venda + a.created_at)).slice(0, 12);
   const itens = ult.map(c => { const p = pessoa(c.vendedor_id) || { nome: '—' }, e = equipeDe(c); const d = c.data_venda.split('-').reverse().slice(0, 2).join('/'); return `<span>🏁 <b>${esc(primeiroNome(p.nome))}</b> · ${esc(e ? e.nome : '')} · <em>${brl(Number(c.credito))}</em> · ${d}</span>`; }).join('');
@@ -253,7 +286,7 @@ function celebrar(c) {
   $('pN').textContent = p.nome; $('pT').textContent = e ? `Equipe ${e.nome}` : '';
   $('pV').textContent = brl(Number(c.credito));
   $('pR').textContent = `${meus}ª cota no mês${pos ? ` · ${pos}º lugar no ranking` : ''}`;
-  $('party').style.setProperty('--tc', corEq(e)); $('party').classList.add('on'); confete(corEq(e)); som();
+  $('party').style.setProperty('--tc', corEq(e)); $('party').classList.add('on'); confete(corEq(e)); abaixarMusica(7600); som();
   setTimeout(() => { $('party').classList.remove('on'); setTimeout(proxima, 900); }, 7000);
 }
 function proxima() { const c = fila.shift(); if (c) { mostrando = true; celebrar(c); } else mostrando = false; }
@@ -289,6 +322,88 @@ async function atualizar() {
 }
 function relogio() { $('hora').textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
 
+// ---------------- Música (YouTube) ----------------
+let yt = null, ytPronto = null, mVol = 60, mLinkAtual = '';
+const MKEY = 'vortelli_tv_musica';
+function lerLink(u) {
+  try {
+    u = u.trim(); if (!u) return null;
+    if (/^[\w-]{11}$/.test(u)) return { video: u };
+    const url = new URL(u.startsWith('http') ? u : 'https://' + u);
+    const list = url.searchParams.get('list');
+    let video = url.searchParams.get('v');
+    if (!video && /youtu\.be$/.test(url.hostname)) video = url.pathname.slice(1, 12);
+    const m = url.pathname.match(/\/(shorts|live|embed)\/([\w-]{11})/); if (!video && m) video = m[2];
+    if (!video && !list) return null;
+    return { video, list };
+  } catch (e) { return null; }
+}
+function carregarYT() {
+  if (ytPronto) return ytPronto;
+  ytPronto = new Promise(res => {
+    window.onYouTubeIframeAPIReady = () => {
+      yt = new YT.Player('ytPlayer', { width: 356, height: 200, playerVars: { autoplay: 1, controls: 0, rel: 0, modestbranding: 1, playsinline: 1 },
+        events: { onReady: () => res(yt), onStateChange: estadoYT, onError: erroYT } });
+    };
+    const s = document.createElement('script'); s.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(s);
+  });
+  return ytPronto;
+}
+async function tocar(link, salvar = true) {
+  const p = lerLink(link);
+  if (!p) { $('mErr').textContent = 'Link não reconhecido. Copie o endereço do vídeo ou da playlist no YouTube.'; return false; }
+  $('music').classList.add('on'); $('mEstado').textContent = 'Carregando…';
+  const pl = await carregarYT();
+  pl.setVolume(mVol); pl.unMute();
+  if (p.list) pl.loadPlaylist({ list: p.list, listType: 'playlist', index: 0 }); else pl.loadVideoById(p.video);
+  if (p.list) setTimeout(() => { try { pl.setLoop(true); } catch (e) {} }, 1500);
+  mLinkAtual = link;
+  if (salvar) try { localStorage.setItem(MKEY, link); } catch (e) {}
+  controles(true); return true;
+}
+function controles(on) {
+  $('mCtl').innerHTML = on
+    ? `<button type="button" data-m="prev">⏮</button><button type="button" data-m="play" id="mPlay">⏸</button><button type="button" data-m="next">⏭</button><button type="button" data-m="menos">🔉</button><button type="button" data-m="mais">🔊</button><button type="button" data-m="trocar">🎵</button>`
+    : `<button class="gold" type="button" id="mAbrir">🎵 Escolher música</button>`;
+}
+function estadoYT(e) {
+  const S = YT.PlayerState, m = $('music');
+  if (e.data === S.PLAYING) { m.classList.add('tocando'); $('mEstado').textContent = 'Tocando agora'; const b = $('mPlay'); if (b) b.textContent = '⏸'; }
+  if (e.data === S.PAUSED) { m.classList.remove('tocando'); $('mEstado').textContent = 'Pausado'; const b = $('mPlay'); if (b) b.textContent = '▶'; }
+  if (e.data === S.ENDED) { const pl = yt.getPlaylist && yt.getPlaylist(); if (!pl || !pl.length) { yt.seekTo(0); yt.playVideo(); } }
+  const d = yt.getVideoData && yt.getVideoData(); if (d && d.title) $('mTitulo').textContent = d.title;
+}
+function erroYT(e) {
+  const msg = (e.data === 101 || e.data === 150) ? 'Esse vídeo não pode tocar fora do YouTube. Escolha outro.' : 'Não foi possível tocar esse vídeo.';
+  $('mTitulo').innerHTML = `<span class="off">${msg}</span>`; $('mEstado').textContent = 'Música da loja';
+  const pl = yt.getPlaylist && yt.getPlaylist(); if (pl && pl.length > 1) setTimeout(() => yt.nextVideo(), 1500);
+}
+function pararMusica() {
+  if (yt) yt.stopVideo();
+  $('music').classList.remove('on', 'tocando'); $('mEstado').textContent = 'Música da loja';
+  $('mTitulo').innerHTML = '<span class="off">Nenhuma música tocando.</span>'; controles(false);
+  try { localStorage.removeItem(MKEY); } catch (e) {}
+}
+function abrirPainel() { $('mErr').textContent = ''; $('mLink').value = mLinkAtual || (() => { try { return localStorage.getItem(MKEY) || ''; } catch (e) { return ''; } })(); $('mPanel').hidden = false; setTimeout(() => $('mLink').focus(), 50); }
+document.addEventListener('click', async e => {
+  if (e.target.closest('#mAbrir')) return abrirPainel();
+  const b = e.target.closest('[data-m]'); if (!b || !yt) return;
+  const a = b.dataset.m;
+  if (a === 'play') { yt.getPlayerState() === YT.PlayerState.PLAYING ? yt.pauseVideo() : yt.playVideo(); }
+  if (a === 'next') yt.nextVideo(); if (a === 'prev') yt.previousVideo();
+  if (a === 'mais') { mVol = Math.min(100, mVol + 10); yt.setVolume(mVol); } if (a === 'menos') { mVol = Math.max(0, mVol - 10); yt.setVolume(mVol); }
+  if (a === 'trocar') abrirPainel();
+});
+$('mTocar').addEventListener('click', async () => { if (await tocar($('mLink').value)) $('mPanel').hidden = true; });
+$('mLink').addEventListener('keydown', async e => { if (e.key === 'Enter') { e.stopPropagation(); if (await tocar($('mLink').value)) $('mPanel').hidden = true; } });
+$('mFechar').addEventListener('click', () => { $('mPanel').hidden = true; });
+$('mParar').addEventListener('click', () => { pararMusica(); $('mPanel').hidden = true; });
+// Volta a última música salva no primeiro clique na tela (o navegador só libera som depois de um clique)
+let retomou = false;
+function retomar() { if (retomou) return; retomou = true; try { const l = localStorage.getItem(MKEY); if (l && !mLinkAtual) tocar(l, false); } catch (e) {} }
+// Na comemoração a música abaixa e depois volta
+function abaixarMusica(ms) { if (!yt || !yt.setVolume) return; yt.setVolume(Math.round(mVol * .2)); setTimeout(() => yt.setVolume(mVol), ms); }
+
 async function iniciar() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { $('msg').innerHTML = 'Para ligar o ranking nesta TV, primeiro entre no <a href="./">Vortelli OS</a> neste navegador.<br>Depois volte para esta página.'; return; }
@@ -302,8 +417,9 @@ async function iniciar() {
 }
 // Tela cheia e cursor
 const fs = () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen?.(); else document.exitFullscreen?.(); };
-$('btnFs').addEventListener('click', () => { fs(); som(); });
-addEventListener('keydown', e => { if (e.key === 'f' || e.key === 'F') fs(); if (e.key === 't' || e.key === 'T') { const c = COTAS.find(valida); if (c) { fila.push(c); if (!mostrando) proxima(); } } });
+$('btnFs').addEventListener('click', () => { fs(); som(); retomar(); });
+addEventListener('click', e => { if (!e.target.closest('#mPanel,#mAbrir')) retomar(); }, { capture: true });
+addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (e.key === 'm' || e.key === 'M') { if (yt && mLinkAtual) { yt.getPlayerState() === YT.PlayerState.PLAYING ? yt.pauseVideo() : yt.playVideo(); } else abrirPainel(); } if (e.key === 'f' || e.key === 'F') { fs(); retomar(); } if (e.key === 't' || e.key === 'T') { const c = COTAS.find(valida); if (c) { fila.push(c); if (!mostrando) proxima(); } } });
 let idle; const acorda = () => { document.body.classList.remove('idle'); clearTimeout(idle); idle = setTimeout(() => document.body.classList.add('idle'), 3000); };
 addEventListener('mousemove', acorda); acorda();
 iniciar();

@@ -784,6 +784,7 @@ function conferir(rel) {
     if (g.corrigir) g.acoes.push({ tipo: 'contrato', txt: `Corrigir contrato ${c.contrato || '(vazio)'} → ${g.contrato}` });
     if (g.venda) {
       if (c.status === 'cancelada') g.infos.push('Cancelada em até 7 dias: sem comissão; a Disal estorna no próximo borderô');
+      else if (c.status === 'estornada' && c.recuperacao) g.infos.push('Recuperação registrada: a equipe recebe o estorno de volta');
       else if (c.status === 'estornada') g.alertas.push({ tipo: 'recuperacao', txt: `Estornada no sistema e a Disal pagou a ${g.pclVenda.join('ª e ')}ª parcela. Se o cliente voltou a pagar, registre a recuperação (a equipe recebe o estorno de volta).` });
       else if (!c.confirmada) g.acoes.push({ tipo: 'confirmar', txt: 'Confirmar venda paga: libera a comissão' });
       else g.infos.push('Venda já confirmada');

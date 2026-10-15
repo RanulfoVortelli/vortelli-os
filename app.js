@@ -594,7 +594,11 @@ function abrirForm(c) {
     $('fCpf').required = false; $('fTel').required = false;
     $('fDisalInfo').textContent = c.confirmada ? `Confirmada na Disal em ${fdate(c.confirmadaEm)}. Comissão liberada.` : 'Aguardando aparecer paga no relatório da Disal. Comissão ainda não liberada.';
   } else { $('fCpf').required = true; $('fTel').required = true; }
-  $('fAdm').required = !c;   // venda nova já entra com o administrativo responsável
+  $('fAdm').required = false; $('fAdm').disabled = !c;
+  if (!c) {   // venda nova: administrativo sai do rodízio automático (um de cada vez)
+    $('fAdm').innerHTML = '<option value="">Rodízio automático</option>';
+    sb.rpc('proximo_adm_previa').then(({ data }) => { if (data && $('fAdm').disabled) $('fAdm').innerHTML = `<option value="">Rodízio automático · próximo da vez: ${esc(nomeP(data))}</option>`; });
+  }
   f.hidden = false; f.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('fCliente').focus();
 }
 $('btnNova').addEventListener('click', () => abrirForm(null));
@@ -638,7 +642,7 @@ $('formCota').addEventListener('submit', async ev => {
   if (error) return toast('Não foi possível salvar: ' + error.message);
   COTAS.unshift(montarCota(data, new Set())); COTAS.sort((a, b) => b.venda - a.venda);
   $('formCota').reset(); $('formCota').hidden = true; initFiltros(); $('qMes').value = ymOf(parseD(row.data_venda));
-  toast('Venda cadastrada. Aguardando a Disal para liberar a comissão.'); renderAll();
+  toast(data.adm_id ? `Venda cadastrada. Administrativo responsável (rodízio): ${nomeP(data.adm_id)}` : 'Venda cadastrada. Aguardando a Disal para liberar a comissão.'); renderAll();
 });
 $('formLanc').addEventListener('submit', async ev => {
   ev.preventDefault();

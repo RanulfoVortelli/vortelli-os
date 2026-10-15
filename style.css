@@ -105,7 +105,9 @@ input[type=number]{font-family:var(--f-num)}
 input:focus-visible,select:focus-visible,.btn:focus-visible{outline:2px solid var(--celeste);outline-offset:1px}
 body:not(.ceo) .so-ceo{display:none!important}
 .cf-bordero{flex-direction:row;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
-#cfConteudo td.cf-wrap{white-space:normal;min-width:260px;max-width:460px}
+#cfConteudo td.cf-wrap{white-space:normal;min-width:280px;max-width:520px}
+.cf-btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.cf-btns:empty{display:none}
 .cf-bordero h2{font-size:26px;margin:4px 0}
 .cf-bordero-acts{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .cf-ok{color:var(--good);font-weight:600}

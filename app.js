@@ -772,7 +772,7 @@ function conferir(rel) {
     if (!c) { g.alertas.push({ tipo: 'nao_cadastrada', txt: 'Venda paga pela Disal que não está no sistema.' }); return; }
     if (g.corrigir) g.acoes.push({ tipo: 'contrato', txt: `Corrigir contrato ${c.contrato || '(vazio)'} → ${g.contrato}` });
     if (g.venda) {
-      if (c.status === 'cancelada') g.alertas.push({ tipo: 'cancelada_paga', txt: 'Cancelada no sistema, mas a Disal pagou a venda. A equipe não recebe; a Disal deve estornar depois.' });
+      if (c.status === 'cancelada') g.infos.push('Cancelada em até 7 dias: sem comissão; a Disal estorna no próximo borderô');
       else if (c.status === 'estornada') g.alertas.push({ tipo: 'recuperacao', txt: `Estornada no sistema e a Disal pagou a ${g.pclVenda.join('ª e ')}ª parcela. Se o cliente voltou a pagar, registre a recuperação (a equipe recebe o estorno de volta).` });
       else if (!c.confirmada) g.acoes.push({ tipo: 'confirmar', txt: 'Confirmar venda paga: libera a comissão' });
       else g.infos.push('Venda já confirmada');
@@ -783,8 +783,10 @@ function conferir(rel) {
       else g.acoes.push({ tipo: 'baixa', k, txt: `Dar baixa na ${k}ª parcela${c.adm_id ? '' : ' (sem administrativo na carteira)'}` });
     });
     if (g.estorno < 0) {
-      if (c.p[2] === 'nao_pago') g.infos.push('Estorno já registrado');
-      else g.alertas.push({ tipo: 'estorno', txt: `A Disal estornou ${brl(-g.estorno, 2)} (${(-g.estorno / g.base * 100).toLocaleString('pt-BR')}% do crédito). No sistema a 2ª parcela está "${c.p[2]}". Se confirmar, a equipe devolve 50%.` });
+      if (c.status === 'cancelada') g.infos.push('Estorno da venda cancelada (esperado)');
+      else if (c.estornoDoc) g.infos.push('Estorno por pendência de documento: não é repassado à equipe');
+      else if (c.p[2] === 'nao_pago') g.infos.push('Estorno já registrado');
+      else g.alertas.push({ tipo: 'estorno', txt: `A Disal estornou ${brl(-g.estorno, 2)} (${(-g.estorno / g.base * 100).toLocaleString('pt-BR')}% do crédito). Foi pendência de documento (a equipe não devolve) ou o cliente não pagou a 2ª (a equipe devolve 50%)?` });
     }
     if (g.entrega) g.infos.push(`Comissão de entrega ${brl(g.entrega, 2)} (só da loja)`);
   });
@@ -843,8 +845,8 @@ function renderConferencia() {
     ${kpi(repNome, rep.length ? brl(repLiq, 2) : '—', rep.length ? `${rep.length} contrato${rep.length > 1 ? 's' : ''} · líquido a repassar` : 'nenhuma venda neste borderô')}
   </div>
   ${alertas.length ? `<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Para você decidir</h2><span class="note">o sistema não muda nada disso sozinho</span></div>
-    <div class="tbl-wrap"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Venda</th><th>Vendedor / fechador</th><th>O que aconteceu</th><th class="r">Disal</th><th></th></tr></thead><tbody>
-    ${alertas.map(a => `<tr><td class="num">${esc(a.g.contrato)}</td><td>${esc(a.g.cliente)}</td><td class="num">${dBR(a.g.dataVenda)}</td><td>${a.g.cota ? quem(a.g.cota) : `<span class="note">Disal: ${esc(a.g.vendedorDisal)}</span>`}</td><td class="cf-wrap">${esc(a.txt)}</td><td class="r n ${a.g.valor < 0 ? 'neg' : ''}">${brl(a.g.valor, 2)}</td><td>${botaoAlerta(a)}</td></tr>`).join('')}
+    <div class="tbl-wrap"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Venda</th><th>Vendedor / fechador</th><th class="r">Disal</th><th>O que aconteceu</th></tr></thead><tbody>
+    ${alertas.map(a => `<tr><td class="num">${esc(a.g.contrato)}</td><td>${esc(a.g.cliente)}</td><td class="num">${dBR(a.g.dataVenda)}</td><td>${a.g.cota ? quem(a.g.cota) : `<span class="note">Disal: ${esc(a.g.vendedorDisal)}</span>`}</td><td class="r n ${a.g.valor < 0 ? 'neg' : ''}">${brl(a.g.valor, 2)}</td><td class="cf-wrap">${esc(a.txt)}<div class="cf-btns">${botaoAlerta(a)}</div></td></tr>`).join('')}
     </tbody></table></div></div>` : ''}
   <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Vendas da loja no borderô</h2><span class="note">${acoes.length ? 'em dourado: o que muda ao clicar em Aplicar' : 'tudo já está em dia no sistema'}</span></div>
     <div class="tbl-wrap"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Venda</th><th>Pcl</th><th>Vendedor / fechador</th><th class="r">Crédito</th><th class="r">Disal</th><th>Situação</th></tr></thead><tbody>
@@ -854,10 +856,9 @@ function renderConferencia() {
 }
 function botaoAlerta(a) {
   const c = a.g.cota;
-  if (a.tipo === 'estorno' && c) return `<button class="btn sm" data-cf="estorno:${c.id}">Marcar 2ª não paga</button>`;
+  if (a.tipo === 'estorno' && c) return `<button class="btn sm" data-cf="doc:${c.id}">Pendência de documento</button> <button class="btn sm ghost" data-cf="estorno:${c.id}">Cliente não pagou a 2ª</button>`;
   if (a.tipo === 'recuperacao' && c && !c.recuperacao) return `<button class="btn sm" data-cf="recuperacao:${c.id}">Registrar recuperação</button>`;
   if (a.tipo === 'nao_cadastrada') return `<button class="btn sm" data-cf="cadastrar:${a.g.contrato}">Cadastrar venda</button>`;
-  if (a.tipo === 'cancelada_paga' && c) return `<button class="btn sm" data-cf="abrir:${c.id}">Abrir venda</button>`;
   return '';
 }
 function renderRepr(rep) {
@@ -1000,6 +1001,12 @@ document.addEventListener('click', async e => {
     const { error } = await sb.from('cotas').update({ recuperacao_data: CF.rel.data }).eq('id', c.id);
     if (error) return toast('Não foi possível salvar: ' + error.message);
     c.recuperacao = parseD(CF.rel.data); toast('Recuperação registrada: a equipe recebe o estorno de volta.'); renderAll(); CF.grupos = conferir(CF.rel); renderConferencia();
+  }
+  if (acao === 'doc') {
+    const c = COTAS.find(x => x.id === +arg);
+    const { error } = await sb.from('cotas').update({ estorno_documento: true }).eq('id', c.id);
+    if (error) return toast('Não foi possível salvar: ' + error.message);
+    c.estornoDoc = true; toast('Registrado: estorno por pendência de documento. A equipe não devolve.'); renderAll(); CF.grupos = conferir(CF.rel); renderConferencia();
   }
   if (acao === 'cadastrar') cadastrarDoRelatorio(arg);
   if (acao === 'abrir') { go('cotas'); abrirForm(COTAS.find(c => c.id === +arg)); }

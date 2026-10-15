@@ -594,6 +594,7 @@ function abrirForm(c) {
     $('fCpf').required = false; $('fTel').required = false;
     $('fDisalInfo').textContent = c.confirmada ? `Confirmada na Disal em ${fdate(c.confirmadaEm)}. Comissão liberada.` : 'Aguardando aparecer paga no relatório da Disal. Comissão ainda não liberada.';
   } else { $('fCpf').required = true; $('fTel').required = true; }
+  $('fAdm').required = !c;   // venda nova já entra com o administrativo responsável
   f.hidden = false; f.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('fCliente').focus();
 }
 $('btnNova').addEventListener('click', () => abrirForm(null));
@@ -841,6 +842,8 @@ function renderConferencia() {
   const sexta = sextaPagamento(addDays(parseD(R0.data), -7));
   const repNome = [...new Set(rep.map(g => g.repr.nome))].join(', ') || 'Representação';
   const ext = CF.grupos.filter(g => g.tipo === 'externo');
+  const semAdm = loja.filter(g => g.cota && g.parcelas.length && !g.cota.adm_id && g.cota.status !== 'cancelada');
+  const admOpts = PESSOAS.filter(p => p.ativo && p.funcao === 'administrativo').sort((a, b) => a.nome.localeCompare(b.nome)).map(p => `<option value="${p.id}">${esc(p.nome)}</option>`).join('');
   const somaG = gs => gs.reduce((s, g) => s + g.linhas.reduce((t, x) => t + x.com_venda + x.est_venda + x.com_entrega + x.est_entrega, 0), 0);
   const divisao = `Vortelli <b>${brl(somaG(loja), 2)}</b>${rep.length ? ` · ${esc(repNome)} <b>${brl(somaG(rep), 2)}</b>` : ''}${ext.length ? ` · outros do login <b>${brl(somaG(ext), 2)}</b>` : ''}`;
 
@@ -856,10 +859,14 @@ function renderConferencia() {
   </div>
   <div class="kpis" style="margin:16px 0">
     ${kpi('Vendas pagas pela Disal', vendasPagas.length, `${confirmar.length} a confirmar · comissão na sexta ${fdate(sexta)}`)}
-    ${kpi('Parcelas 3ª a 5ª', loja.reduce((s, g) => s + g.parcelas.length, 0), `${baixas.length} a dar baixa (comissão do administrativo)`)}
+    ${kpi('Parcelas 3ª a 5ª', loja.reduce((s, g) => s + g.parcelas.length, 0), `${baixas.length} a dar baixa${semAdm.length ? ` · ${semAdm.length} venda${semAdm.length > 1 ? 's' : ''} sem administrativo` : ''}`)}
     ${kpi('Para você decidir', alertas.length, alertas.length ? 'veja a lista abaixo' : 'nenhum ponto de atenção')}
     ${kpi(repNome, rep.length ? brl(repLiq, 2) : '—', rep.length ? `${rep.length} contrato${rep.length > 1 ? 's' : ''} · líquido a repassar` : 'nenhuma venda neste borderô')}
   </div>
+  ${semAdm.length ? `<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Parcelas pagas sem administrativo</h2><span class="note">escolha quem acompanha o cliente: ele recebe 0,05% das parcelas pagas nesta sexta e nas próximas</span></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Venda</th><th>Vendedor / fechador</th><th>Parcelas pagas</th><th class="r">Crédito</th><th>Administrativo responsável</th></tr></thead><tbody>
+    ${semAdm.map(g => `<tr><td class="num">${esc(g.contrato)}</td><td>${esc(g.cliente)}</td><td class="num">${dBR(g.dataVenda)}</td><td>${quem(g.cota)}</td><td class="num">${g.parcelas.map(k => k + 'ª').join(', ')}</td><td class="r n">${brl(g.base)}</td><td><div class="cf-btns" style="margin:0"><select data-cf-adm="${g.cota.id}" aria-label="Administrativo de ${esc(g.cliente)}"><option value="">Escolher…</option>${admOpts}</select><button class="btn sm" data-cf="adm:${g.cota.id}">Salvar</button></div></td></tr>`).join('')}
+    </tbody></table></div></div>` : ''}
   ${alertas.length ? `<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Para você decidir</h2><span class="note">o sistema não muda nada disso sozinho</span></div>
     <div class="tbl-wrap"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Venda</th><th>Vendedor / fechador</th><th class="r">Disal</th><th>O que aconteceu</th></tr></thead><tbody>
     ${alertas.map(a => `<tr><td class="num">${esc(a.g.contrato)}</td><td>${esc(a.g.cliente)}</td><td class="num">${dBR(a.g.dataVenda)}</td><td>${a.g.cota ? quem(a.g.cota) : `<span class="note">Disal: ${esc(a.g.vendedorDisal)}</span>`}</td><td class="r n ${a.g.valor < 0 ? 'neg' : ''}">${brl(a.g.valor, 2)}</td><td class="cf-wrap">${esc(a.txt)}<div class="cf-btns">${botaoAlerta(a)}</div></td></tr>`).join('')}
@@ -1040,6 +1047,14 @@ document.addEventListener('click', async e => {
     if (CF.salvo) await sb.from('disal_itens').update(dono === 'externo' ? { tipo: 'externo', cota_id: null } : { tipo: 'loja' }).eq('vendedor_disal', nome);
     toast(dono === 'externo' ? `${nome}: outros do login. Não entra mais na conferência.` : `${nome}: vendedor da Vortelli.`);
     CF.grupos = conferir(CF.rel); renderConferencia();
+  }
+  if (acao === 'adm') {
+    const sel = document.querySelector(`[data-cf-adm="${arg}"]`), c = COTAS.find(x => x.id === +arg);
+    if (!sel || !sel.value) return toast('Escolha o administrativo');
+    const { error } = await sb.from('cotas').update({ adm_id: sel.value }).eq('id', c.id);
+    if (error) return toast('Não foi possível salvar: ' + error.message);
+    c.adm_id = sel.value; c.adm = nomeP(sel.value);
+    toast(`${c.cliente.split(' ')[0]}: carteira de ${c.adm}`); renderAll(); CF.grupos = conferir(CF.rel); renderConferencia();
   }
   if (acao === 'cadastrar') cadastrarDoRelatorio(arg);
   if (acao === 'abrir') { go('cotas'); abrirForm(COTAS.find(c => c.id === +arg)); }

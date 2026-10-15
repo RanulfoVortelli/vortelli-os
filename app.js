@@ -216,7 +216,7 @@ function eventosEquipe(c) {
     partes.forEach(x => {
       if (x.papel === 'Gerente' && !vendedorRecebeu) return;
       ev.push({ pessoa: x.pessoa, papel: x.papel, data: d, valor: -x.valor * f, tipo: 'est', cota: c });
-      if (c.recuperacao) ev.push({ pessoa: x.pessoa, papel: x.papel, data: c.recuperacao, valor: x.valor * f, tipo: 'rec', cota: c });
+      if (c.recuperacao) ev.push({ pessoa: x.pessoa, papel: x.papel, data: semanaDisal(c.recuperacao), valor: x.valor * f, tipo: 'rec', cota: c });   // recuperação paga na semana do borderô
     });
   }
   // Administrativo e gerente administrativo: 0,05% por 3ª, 4ª e 5ª parcela paga
@@ -683,7 +683,7 @@ document.addEventListener('click', async e => {
 const LIB_XLSX = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 const LIB_PDF = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
 const LIB_PDFT = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
-const CF = { rel: null, grupos: [], repr: [], reprLista: [], hist: [], salvo: false, carregado: false };
+const CF = { rel: null, grupos: [], repr: [], reprLista: [], hist: [], vend: new Map(), salvo: false, carregado: false };
 
 const normNome = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\(.*?\)/g, ' ')
   .toUpperCase().replace(/[^A-Z ]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -752,7 +752,7 @@ function conferir(rel) {
   const grupos = new Map();
   rel.itens.forEach(it => {
     const rp = reprDe(it.vendedor_disal);
-    it.tipo = rp ? 'representacao' : 'loja'; it.repr = rp || null;
+    it.tipo = rp ? 'representacao' : CF.vend.get(normNome(it.vendedor_disal)) === 'externo' ? 'externo' : 'loja'; it.repr = rp || null;
     const k = it.tipo + ':' + it.contrato;
     if (!grupos.has(k)) grupos.set(k, { contrato: it.contrato, cliente: it.cliente, cotaTxt: it.cota_txt, dataVenda: it.data_venda, base: it.base, vendedorDisal: it.vendedor_disal, tipo: it.tipo, repr: rp, linhas: [] });
     grupos.get(k).linhas.push(it);
@@ -762,6 +762,12 @@ function conferir(rel) {
     const { c, corrigir } = acharCota(g, porContrato, porNome);
     g.cota = c; g.corrigir = !!(c && corrigir);
     g.linhas.forEach(it => { it.cota_id = c ? c.id : null; });
+  });
+  // Vendedor da Disal é da Vortelli se já foi marcado assim ou se aparece em algum contrato que está no sistema
+  CF.vendLoja = new Set(lista.filter(g => g.tipo === 'loja' && g.cota).map(g => normNome(g.vendedorDisal)));
+  lista.filter(g => g.tipo === 'externo').forEach(g => { g.valor = g.linhas.reduce((s, x) => s + x.com_venda + x.est_venda + x.com_entrega + x.est_entrega, 0); });
+  lista.filter(g => g.tipo === 'loja').forEach(g => {
+    const c = g.cota;
     g.venda = g.linhas.some(x => [1, 2].includes(x.pcl) && x.com_venda > 0);
     g.pclVenda = g.linhas.filter(x => [1, 2].includes(x.pcl) && x.com_venda > 0).map(x => x.pcl);
     g.parcelas = [...new Set(g.linhas.filter(x => x.pcl >= 3 && x.pcl <= 5 && x.com_venda > 0).map(x => x.pcl))].sort();
@@ -769,7 +775,12 @@ function conferir(rel) {
     g.entrega = g.linhas.reduce((s, x) => s + x.com_entrega + x.est_entrega, 0);
     g.valor = g.linhas.reduce((s, x) => s + x.com_venda + x.est_venda + x.com_entrega + x.est_entrega, 0);
     g.acoes = []; g.alertas = []; g.infos = [];
-    if (!c) { g.alertas.push({ tipo: 'nao_cadastrada', txt: 'Venda paga pela Disal que não está no sistema.' }); return; }
+    if (!c) {
+      const nv = normNome(g.vendedorDisal);
+      if (CF.vend.get(nv) === 'vortelli' || CF.vendLoja.has(nv)) g.alertas.push({ tipo: 'nao_cadastrada', txt: 'Venda da Vortelli que a Disal pagou e não está no sistema. Cadastre para entrar na comissão.' });
+      else g.alertas.push({ tipo: 'vendedor_novo', txt: `Vendedor da Disal que nunca apareceu nas vendas da loja: ${g.vendedorDisal || '(sem nome)'}. Ele é da Vortelli ou de outro usuário do login? A escolha vale para as próximas semanas.` });
+      return;
+    }
     if (g.corrigir) g.acoes.push({ tipo: 'contrato', txt: `Corrigir contrato ${c.contrato || '(vazio)'} → ${g.contrato}` });
     if (g.venda) {
       if (c.status === 'cancelada') g.infos.push('Cancelada em até 7 dias: sem comissão; a Disal estorna no próximo borderô');
@@ -828,11 +839,15 @@ function renderConferencia() {
   const repLiq = rep.reduce((s, g) => s + g.reprLinhas.reduce((t, l) => t + l.liquido, 0), 0);
   const sexta = sextaPagamento(addDays(parseD(R0.data), -7));
   const repNome = [...new Set(rep.map(g => g.repr.nome))].join(', ') || 'Representação';
+  const ext = CF.grupos.filter(g => g.tipo === 'externo');
+  const somaG = gs => gs.reduce((s, g) => s + g.linhas.reduce((t, x) => t + x.com_venda + x.est_venda + x.com_entrega + x.est_entrega, 0), 0);
+  const divisao = `Vortelli <b>${brl(somaG(loja), 2)}</b>${rep.length ? ` · ${esc(repNome)} <b>${brl(somaG(rep), 2)}</b>` : ''}${ext.length ? ` · outros do login <b>${brl(somaG(ext), 2)}</b>` : ''}`;
 
   el.innerHTML = `
   <div class="panel cf-bordero">
     <div><span class="eyebrow">Borderô ${esc(R0.bordero)} · ${dBR(R0.data)} · login ${esc(R0.login || '—')}</span>
       <h2>${brl(R0.total ?? soma, 2)} a receber da Disal</h2>
+      <p class="sub cf-div">${divisao}</p>
       <p class="sub">${R0.itens.length} linhas, ${CF.grupos.length} contratos · arquivo ${esc(R0.arquivo || '')} · ${bate ? '<span class="cf-ok">soma das linhas confere com o total</span>' : `<span class="neg">soma das linhas (${brl(soma, 2)}) diferente do total</span>`}</p></div>
     <div class="cf-bordero-acts">${CF.salvo ? '<span class="chip c-pago">Conferência aplicada</span>' : ''}
       <button class="btn" id="cfFechar" type="button">Fechar</button>
@@ -852,13 +867,18 @@ function renderConferencia() {
     <div class="tbl-wrap"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Venda</th><th>Pcl</th><th>Vendedor / fechador</th><th class="r">Crédito</th><th class="r">Disal</th><th>Situação</th></tr></thead><tbody>
     ${loja.sort((a, b) => (b.dataVenda || '').localeCompare(a.dataVenda || '')).map(g => `<tr class="${g.acoes.length ? 'cf-muda' : ''}"><td class="num">${esc(g.contrato)}</td><td>${esc(g.cliente)}</td><td class="num">${dBR(g.dataVenda)}</td><td class="num">${g.linhas.map(x => x.pcl || 'E').join(', ')}</td><td>${g.cota ? quem(g.cota) : '<span class="note">não cadastrada</span>'}</td><td class="r n">${brl(g.base)}</td><td class="r n ${g.valor < 0 ? 'neg' : ''}">${brl(g.valor, 2)}</td><td class="cf-wrap">${[...g.acoes.map(a => `<span class="cf-tag">${esc(a.txt)}</span>`), ...g.alertas.map(() => '<span class="chip c-atrasado">Decidir</span>'), ...g.infos.map(t => `<span class="note">${esc(t)}</span>`)].join(' ') || '<span class="note">—</span>'}</td></tr>`).join('')}
     </tbody></table></div></div>
-  ${rep.length ? renderRepr(rep) : ''}`;
+  ${rep.length ? renderRepr(rep) : ''}
+  ${ext.length ? `<details class="panel" style="margin-bottom:16px"><summary><b>Outros do login</b> <span class="note">· ${ext.length} contrato${ext.length > 1 ? 's' : ''} de vendedores que não são da Vortelli, fora da conferência</span></summary>
+    <div class="tbl-wrap" style="margin-top:12px"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Venda</th><th>Vendedor na Disal</th><th class="r">Disal</th><th></th></tr></thead><tbody>
+    ${ext.map(g => `<tr><td class="num">${esc(g.contrato)}</td><td>${esc(g.cliente)}</td><td class="num">${dBR(g.dataVenda)}</td><td>${esc(g.vendedorDisal)}</td><td class="r n ${g.valor < 0 ? 'neg' : ''}">${brl(g.valor, 2)}</td><td><button class="btn sm ghost" data-cf="vend:vortelli:${esc(g.vendedorDisal)}">É da Vortelli</button></td></tr>`).join('')}
+    </tbody></table></div></details>` : ''}`;
 }
 function botaoAlerta(a) {
   const c = a.g.cota;
   if (a.tipo === 'estorno' && c) return `<button class="btn sm" data-cf="doc:${c.id}">Pendência de documento</button> <button class="btn sm ghost" data-cf="estorno:${c.id}">Cliente não pagou a 2ª</button>`;
   if (a.tipo === 'recuperacao' && c && !c.recuperacao) return `<button class="btn sm" data-cf="recuperacao:${c.id}">Registrar recuperação</button>`;
   if (a.tipo === 'nao_cadastrada') return `<button class="btn sm" data-cf="cadastrar:${a.g.contrato}">Cadastrar venda</button>`;
+  if (a.tipo === 'vendedor_novo') return `<button class="btn sm" data-cf="vend:vortelli:${esc(a.g.vendedorDisal)}">É da Vortelli</button> <button class="btn sm ghost" data-cf="vend:externo:${esc(a.g.vendedorDisal)}">Não é nosso</button>`;
   return '';
 }
 function renderRepr(rep) {
@@ -885,9 +905,10 @@ function renderHistorico() {
 
 /* ---------- Ações ---------- */
 async function carregarBaseConferencia() {
-  const [rp, hs] = await Promise.all([sb.from('representacoes').select('*'), sb.from('disal_relatorios').select('*').order('data', { ascending: false }).limit(30)]);
+  const [rp, hs, vd] = await Promise.all([sb.from('representacoes').select('*'), sb.from('disal_relatorios').select('*').order('data', { ascending: false }).limit(30), sb.from('disal_vendedores').select('*')]);
   if (rp.error) throw rp.error;
   CF.reprLista = rp.data || []; CF.hist = hs.data || []; CF.carregado = true;
+  CF.vend = new Map((vd.data || []).map(v => [normNome(v.nome), v.dono]));
 }
 async function abrirConferencia() {
   if (!GESTOR) return;
@@ -949,6 +970,8 @@ async function aplicarConferencia() {
         if (res && res.error) erros.push(`${g.contrato}: ${res.error.message}`);
       }
     }
+    const novos = [...new Set(CF.grupos.filter(g => g.tipo === 'loja' && g.cota && g.vendedorDisal).map(g => g.vendedorDisal))].filter(n => !CF.vend.has(normNome(n)));
+    if (novos.length) await sb.from('disal_vendedores').upsert(novos.map(nome => ({ nome, dono: 'vortelli' })), { onConflict: 'nome', ignoreDuplicates: true });
     await carregarBaseConferencia();
     CF.grupos = conferir(R0); CF.salvo = true;
     renderAll(); renderConferencia();
@@ -1007,6 +1030,15 @@ document.addEventListener('click', async e => {
     const { error } = await sb.from('cotas').update({ estorno_documento: true }).eq('id', c.id);
     if (error) return toast('Não foi possível salvar: ' + error.message);
     c.estornoDoc = true; toast('Registrado: estorno por pendência de documento. A equipe não devolve.'); renderAll(); CF.grupos = conferir(CF.rel); renderConferencia();
+  }
+  if (acao === 'vend') {
+    const [dono, nome] = arg.split(/:(.*)/s);
+    const { error } = await sb.from('disal_vendedores').upsert({ nome, dono, updated_at: new Date().toISOString() }, { onConflict: 'nome' });
+    if (error) return toast('Não foi possível salvar: ' + error.message);
+    CF.vend.set(normNome(nome), dono);
+    if (CF.salvo) await sb.from('disal_itens').update(dono === 'externo' ? { tipo: 'externo', cota_id: null } : { tipo: 'loja' }).eq('vendedor_disal', nome);
+    toast(dono === 'externo' ? `${nome}: outros do login. Não entra mais na conferência.` : `${nome}: vendedor da Vortelli.`);
+    CF.grupos = conferir(CF.rel); renderConferencia();
   }
   if (acao === 'cadastrar') cadastrarDoRelatorio(arg);
   if (acao === 'abrir') { go('cotas'); abrirForm(COTAS.find(c => c.id === +arg)); }

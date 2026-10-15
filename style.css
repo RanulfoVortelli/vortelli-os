@@ -108,6 +108,8 @@ body:not(.ceo) .so-ceo{display:none!important}
 #cfConteudo td.cf-wrap{white-space:normal;min-width:280px;max-width:520px}
 .cf-btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .cf-btns:empty{display:none}
+.cf-div b{font-family:var(--f-num);color:var(--ink)}
+details.panel>summary{cursor:pointer;list-style:revert}
 .cf-bordero h2{font-size:26px;margin:4px 0}
 .cf-bordero-acts{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .cf-ok{color:var(--good);font-weight:600}

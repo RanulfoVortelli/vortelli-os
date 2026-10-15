@@ -594,6 +594,7 @@ function abrirForm(c) {
     $('fCpf').required = false; $('fTel').required = false;
     $('fDisalInfo').textContent = c.confirmada ? `Confirmada na Disal em ${fdate(c.confirmadaEm)}. Comissão liberada.` : 'Aguardando aparecer paga no relatório da Disal. Comissão ainda não liberada.';
   } else { $('fCpf').required = true; $('fTel').required = true; }
+  ['fContrato', 'fGrupo', 'fCotaN', 'fVenc'].forEach(k => { $(k).required = !c; });   // venda nova: tudo preenchido de uma vez
   $('fAdm').required = false; $('fAdm').disabled = !c;
   if (!c) {   // venda nova: administrativo sai do rodízio automático (um de cada vez)
     $('fAdm').innerHTML = '<option value="">Rodízio automático</option>';

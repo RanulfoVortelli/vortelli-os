@@ -209,7 +209,6 @@ function partesVenda(c) {
   if (ger && ger.id !== pf.id) partes.push({ pessoa: ger.id, papel: 'Gerente', valor: r('gerente_fechador_outra_equipe') });
   return { situacao: 3, partes };
 }
-const SO_BORDERO_DESDE = new Date(2026, 9, 5);   // semana que paga na sexta 16/10/2026
 // Desligamento: nada é pago nem estornado a partir da data de saída
 // Recorrência do supervisor (regra de 16/10/2026): 3ª, 4ª e 5ª pagas, só nos clientes que ele mesmo vendeu e fechou,
 // no mesmo percentual do administrativo. Vale para parcelas pagas a partir da semana de 12/10/2026 (sexta 23/10).
@@ -239,8 +238,6 @@ function eventosEquipe(c) {
   for (let k = 3; k <= 5; k++) {
     if (c.p[k] !== 'pago') continue;
     const d = dataParcela(c, k);
-    // Regra (16/10/2026): só paga parcela confirmada no borderô oficial da Disal. Baixa manual não gera comissão (vale da sexta 16/10 em diante).
-    if (!(c.disalEm && c.disalEm[k]) && d >= SO_BORDERO_DESDE) continue;
     if (c.adm_id) ev.push({ pessoa: c.adm_id, papel: 'Administrativo', data: d, valor: c.credito * r('adm_parcela') / 100, tipo: 'com', cota: c });
     gerAdm.forEach(g => ev.push({ pessoa: g.id, papel: 'Gerente adm', data: d, valor: c.credito * r('gerente_adm_parcela') / 100, tipo: 'com', cota: c }));
     const sp = supRecorrente(c);

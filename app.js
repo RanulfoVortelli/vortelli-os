@@ -149,7 +149,7 @@ function montarCota(c, contatos) {
   };
 }
 const valida = c => c.status !== 'cancelada' && c.credito > 0;
-const incompleta = c => valida(c) && !c.historico && (!c.contrato || !c.adm_id);
+const incompleta = c => valida(c) && !c.historico && (!c.contrato || !c.grupo || !c.cotaNum || !c.adm_id);
 // Base da comissão da venda: a data em que a Disal confirmou (ou a venda, se confirmou antes)
 const semanaDisal = d => addDays(d, -7);   // sextaPagamento(d - 7) = sexta da semana do borderô
 const baseVenda = c => c.confirmadaEm && semanaDisal(c.confirmadaEm) > c.venda ? semanaDisal(c.confirmadaEm) : c.venda;
@@ -596,7 +596,7 @@ function abrirForm(c) {
     $('fCpf').required = false; $('fTel').required = false;
     $('fDisalInfo').textContent = c.confirmada ? `Confirmada na Disal em ${fdate(c.confirmadaEm)}. Comissão liberada.` : 'Aguardando aparecer paga no relatório da Disal. Comissão ainda não liberada.';
   } else { $('fCpf').required = true; $('fTel').required = true; }
-  ['fContrato', 'fGrupo', 'fCotaN', 'fVenc'].forEach(k => { $(k).required = !c; });   // venda nova: tudo preenchido de uma vez
+  ['fContrato', 'fGrupo', 'fCotaN', 'fVenc'].forEach(k => { $(k).required = false; });   // grupo, cota e contrato saem na Disal no dia seguinte ao pagamento
   $('fAdm').required = false; $('fAdm').disabled = !c;
   if (!c) {   // venda nova: administrativo sai do rodízio automático (um de cada vez)
     $('fAdm').innerHTML = '<option value="">Rodízio automático</option>';

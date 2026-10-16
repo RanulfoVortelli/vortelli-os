@@ -207,6 +207,12 @@ function partesVenda(c) {
   return { situacao: 3, partes };
 }
 // Desligamento: nada é pago nem estornado a partir da data de saída
+// Recorrência do supervisor (regra de 16/10/2026): 3ª, 4ª e 5ª pagas, só nos clientes que ele mesmo vendeu e fechou,
+// no mesmo percentual do administrativo. Vale para parcelas pagas a partir da semana de 12/10/2026 (sexta 23/10).
+const SUP_REC_DESDE = new Date(2026, 9, 12);
+const supPct = () => (R.sup_parcela ? r('sup_parcela') : r('adm_parcela'));
+const supRecorrente = c => { const pv = pessoaPorId(c.vendedor_id), pf = pessoaPorId(c.fechador_id), q = pv || pf;
+  return q && q.funcao === 'gerente' && (!pv || !pf || pv.id === pf.id) ? q : null; };
 const ativoEm = (id, d) => { const p = pessoaPorId(id); return !(p && p.data_saida && d >= parseD(p.data_saida)); };
 function eventosEquipe(c) {
   if (!valida(c)) return [];
@@ -231,6 +237,8 @@ function eventosEquipe(c) {
     const d = dataParcela(c, k);
     if (c.adm_id) ev.push({ pessoa: c.adm_id, papel: 'Administrativo', data: d, valor: c.credito * r('adm_parcela') / 100, tipo: 'com', cota: c });
     gerAdm.forEach(g => ev.push({ pessoa: g.id, papel: 'Gerente adm', data: d, valor: c.credito * r('gerente_adm_parcela') / 100, tipo: 'com', cota: c }));
+    const sp = supRecorrente(c);
+    if (sp && d >= SUP_REC_DESDE) ev.push({ pessoa: sp.id, papel: 'Supervisor (carteira)', data: d, valor: c.credito * supPct() / 100, tipo: 'com', cota: c });
   }
   return ev.filter(e => ativoEm(e.pessoa, e.data));
 }
@@ -394,7 +402,7 @@ function renderEquipes() {
     <div class="list">${ativos.filter(p => ['administrativo', 'gerente_adm'].includes(p.funcao)).map(p => `<div class="row"><div class="l">${esc(p.nome)}<span>${funcaoNome(p)}</span></div><b>${COTAS.filter(c => valida(c) && c.adm_id === p.id && c.p[5] !== 'pago' && c.p[2] !== 'nao_pago').length} clientes</b></div>`).join('')}</div></article>`;
 }
 
-const GRUPOS = [['Disal e loja', ['entrada', 'disal_venda', 'disal_p345', 'estorno_disal', 'estorno_doc', 'recuperacao', 'imposto', 'meta_cotas']], ['Venda (por situação)', ['vendedor', 'vendedor_fecha', 'fechador_pct', 'fixo_fechador_sozinho', 'fixo_gerente_propria_equipe', 'fixo_fechador_outra_equipe', 'gerente_fechador_outra_equipe', 'gerente_vendedor_fecha_pct', 'gerente_vendedor_fecha_fixo']], ['Parcelas, estorno e bônus', ['adm_parcela', 'gerente_adm_parcela', 'estorno_equipe', 'gg_min_cotas', 'gg_por_cota']], ['Salários', ['salario_minimo', 'folha_dia_1', 'folha_dia_2']]];
+const GRUPOS = [['Disal e loja', ['entrada', 'disal_venda', 'disal_p345', 'estorno_disal', 'estorno_doc', 'recuperacao', 'imposto', 'meta_cotas']], ['Venda (por situação)', ['vendedor', 'vendedor_fecha', 'fechador_pct', 'fixo_fechador_sozinho', 'fixo_gerente_propria_equipe', 'fixo_fechador_outra_equipe', 'gerente_fechador_outra_equipe', 'gerente_vendedor_fecha_pct', 'gerente_vendedor_fecha_fixo']], ['Parcelas, estorno e bônus', ['adm_parcela', 'gerente_adm_parcela', 'sup_parcela', 'estorno_equipe', 'gg_min_cotas', 'gg_por_cota']], ['Salários', ['salario_minimo', 'folha_dia_1', 'folha_dia_2']]];
 function renderRegras() {
   $('rules').innerHTML = GRUPOS.map(([t, ks]) => `<div class="panel"><h2>${t}</h2><div>${ks.filter(k => R[k]).map(k => `<div class="rule"><div class="t"><label for="r_${k}" style="color:var(--ink);font-size:14px">${esc(R[k].descricao)}</label>${R[k].pendente ? '<span class="pend">Pendente de confirmação</span>' : ''}</div><input id="r_${k}" type="number" step="any" value="${R[k].valor}" data-rule="${k}" ${GESTOR ? '' : 'disabled'}></div>`).join('')}</div></div>`).join('');
 }
@@ -487,7 +495,7 @@ function renderRanking() {
   }).join('');
 }
 /* ---------------- Minha comissão (extrato individual) ---------------- */
-const tipoLanc = e => e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : 'Venda');
+const tipoLanc = e => e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : 'Venda');
 function renderMinha() {
   if (!ME || !$('mcSexta').value) return;
   if (GESTOR && !$('mcPessoa').value) return;
@@ -534,7 +542,7 @@ function initFiltros() {
   $('fAdm').innerHTML = '<option value="">Sem carteira</option>' + opt(ativos.filter(p => ['administrativo', 'gerente_adm'].includes(p.funcao)));
   $('fData').value = iso(TODAY); $('lData').value = iso(TODAY);
 }
-function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); renderUsuarios(); renderRanking(); renderMinha(); renderTrafego(); }
+function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); renderUsuarios(); renderRanking(); renderMinha(); renderTrafego(); renderCarteira(); }
 function go(view) {
   if (view === 'conferencia') abrirConferencia();
   if (view === 'ranking' && !GESTOR && !$('rkTv').src) $('rkTv').src = 'tv.html?embed=1';
@@ -1272,5 +1280,96 @@ document.addEventListener('click', async e => {
   }
 });
 /* <<< TRAFEGO <<< */
+/* >>> CARTEIRA >>> */
+// Minha carteira: clientes de cada pessoa, com o que já recebeu, o que ainda pode receber e o que está em risco.
+// Recorrência (3ª, 4ª e 5ª): administrativo, gerente adm e supervisor (só clientes que ele mesmo vendeu e fechou).
+const podeVerTodasCarteiras = () => GESTOR || (ME && ME.funcao === 'gerente_adm');
+function carteiraDe(alvo) {
+  const f = alvo.funcao;
+  return COTAS.filter(c => valida(c) && (
+    f === 'administrativo' ? c.adm_id === alvo.id :
+    f === 'gerente_adm' ? true :
+    f === 'gerente' ? (c.vendedor_id === alvo.id || c.fechador_id === alvo.id || (pessoaPorId(c.vendedor_id) || {}).equipe_id === alvo.equipe_id) :
+    (c.vendedor_id === alvo.id || c.fechador_id === alvo.id)));
+}
+// Valor que a pessoa recebe por 3ª/4ª/5ª parcela paga deste cliente (0 se não tem recorrência)
+function recorrenciaPorParcela(c, alvo, d) {
+  let v = 0;
+  if (c.adm_id === alvo.id) v += c.credito * r('adm_parcela') / 100;
+  if (alvo.funcao === 'gerente_adm') v += c.credito * r('gerente_adm_parcela') / 100;
+  const sp = supRecorrente(c);
+  if (sp && sp.id === alvo.id && (!d || d >= SUP_REC_DESDE)) v += c.credito * supPct() / 100;
+  return v;
+}
+function linhaCarteira(c, alvo) {
+  const meus = eventosEquipe(c).filter(e => e.pessoa === alvo.id);
+  const recebido = meus.filter(e => e.data <= TODAY).reduce((s, e) => s + e.valor, 0);
+  const prev = [], venc0 = [];   // previsão (a vencer) e parcelas já vencidas sem baixa
+  meus.filter(e => e.data > TODAY && e.valor > 0).forEach(e => prev.push({ data: e.data, valor: e.valor, k: 0 }));
+  if (c.p[2] !== 'nao_pago' && c.status !== 'estornada') {
+    for (let k = 3; k <= 5; k++) {
+      if (c.p[k] !== 'aberto') continue;
+      const d = venc(c, k), v = recorrenciaPorParcela(c, alvo, d);
+      if (v > 0 && ativoEm(alvo.id, d)) { if (stView(c, k) !== 'atrasado') prev.push({ data: d, valor: v, k }); else if (!c.historico && d >= addDays(TODAY, -60)) venc0.push({ data: d, valor: v, k }); }
+    }
+  }
+  const minhaVenda = partesVenda(c).partes.filter(x => x.pessoa === alvo.id).reduce((s, x) => s + x.valor, 0);
+  if (!c.confirmada && minhaVenda > 0) prev.push({ data: TODAY, valor: minhaVenda, k: 0, disal: true });
+  // Risco: mesma janela do radar da 2ª parcela (a vencer ou vencida há até 45 dias)
+  const risco = c.p[2] === 'aberto' && !c.estornoDoc && venc(c, 2) >= addDays(TODAY, -45) ? minhaVenda * r('estorno_equipe') / 100 : 0;
+  const prox = [2, 3, 4, 5].find(k => c.p[k] === 'aberto');
+  return { c, recebido, prev, previsto: prev.reduce((s, x) => s + x.valor, 0), semBaixa: venc0.reduce((s, x) => s + x.valor, 0), risco, prox };
+}
+const situacaoCart = c => {
+  if (c.status === 'estornada' || c.p[2] === 'nao_pago') return 'estornada';
+  if ([2, 3, 4, 5].some(k => stView(c, k) === 'atrasado')) return 'atrasada';
+  if ([2, 3, 4, 5].every(k => ['pago', 'cancelado'].includes(c.p[k]))) return 'concluida';
+  return 'andamento';
+};
+function renderCarteira() {
+  if (!ME || !$('ctFiltro')) return;
+  const todas = podeVerTodasCarteiras();
+  $('ctPessoaL').hidden = !todas;
+  if (todas && !$('ctPessoa').options.length) {
+    $('ctPessoa').innerHTML = PESSOAS.filter(p => p.ativo && !['ceo', 'tv'].includes(p.funcao)).sort((a, b) => a.nome.localeCompare(b.nome))
+      .map(p => `<option value="${p.id}">${esc(p.nome)} · ${funcaoNome(p)}</option>`).join('');
+    if (ME.funcao === 'gerente_adm') $('ctPessoa').value = ME.id;
+  }
+  const alvo = todas ? pessoaPorId($('ctPessoa').value) : ME;
+  if (!alvo) return;
+  $('ctTitulo').textContent = alvo.id === ME.id ? 'Minha carteira' : `Carteira de ${alvo.nome}`;
+  const fil = $('ctFiltro').value, q = $('ctBusca').value.trim().toLowerCase();
+  const base = carteiraDe(alvo).map(c => linhaCarteira(c, alvo));
+  const L = base.filter(x => (fil === 'todas' || situacaoCart(x.c) === fil || (fil === 'receber' && (x.previsto > 0 || x.semBaixa > 0)) || (fil === 'risco' && x.risco > 0))
+      && (!q || `${x.c.cliente} ${x.c.contrato || ''} ${x.c.vendedor}`.toLowerCase().includes(q)))
+    .sort((a, b) => (a.prox ? +venc(a.c, a.prox) : 9e15) - (b.prox ? +venc(b.c, b.prox) : 9e15));
+  const soma = (l, k) => l.reduce((s, x) => s + x[k], 0);
+  const lim = addDays(TODAY, 30), prox30 = base.reduce((s, x) => s + x.prev.filter(p => p.data <= lim).reduce((a, p) => a + p.valor, 0), 0);
+  const andamento = base.filter(x => ['andamento', 'atrasada'].includes(situacaoCart(x.c))).length;
+  $('kpisCt').innerHTML =
+    kpi('Clientes', base.length, `${andamento} em andamento · ${base.filter(x => situacaoCart(x.c) === 'atrasada').length} com parcela atrasada`) +
+    kpi('Já recebido', brl(soma(base, 'recebido'), 2), 'Comissões e recorrências pagas') +
+    kpi('Previsão a receber', brl(soma(base, 'previsto'), 2), 'Se os clientes pagarem em dia') +
+    kpi('Próximos 30 dias', brl(prox30, 2), 'Parte da previsão') +
+    kpi('Vencidas sem baixa', brl(soma(base, 'semBaixa'), 2), 'Entram quando a parcela for baixada como paga') +
+    kpi('Em risco na 2ª', `<span class="${soma(base, 'risco') ? 'neg' : ''}">${brl(soma(base, 'risco'), 2)}</span>`, 'Estorno de 50% se a 2ª não for paga');
+  // Previsão por mês (pela sexta em que cai o pagamento)
+  const porMes = {};
+  base.forEach(x => x.prev.forEach(p => { const ym = ymOf(sextaPagamento(p.data)); porMes[ym] = (porMes[ym] || 0) + p.valor; }));
+  const meses = Object.keys(porMes).map(Number).sort((a, b) => a - b).slice(0, 6);
+  $('ctMeses').innerHTML = meses.length ? meses.map(ym => `<div class="row"><div class="l">${MESES[ym % 12][0].toUpperCase() + MESES[ym % 12].slice(1)} de ${Math.floor(ym / 12)}</div><b>${brl(porMes[ym], 2)}</b></div>`).join('') : '<p class="note">Nada previsto por enquanto.</p>';
+  const sitChip = { andamento: '<span class="chip c-aberto">Em dia</span>', atrasada: '<span class="chip c-atrasado">Atrasada</span>', concluida: '<span class="chip c-pago">Concluída</span>', estornada: '<span class="chip c-canc">Estornada</span>' };
+  $('tbCt').innerHTML = L.length ? L.slice(0, 400).map(x => { const c = x.c;
+    return `<tr><td>${esc(c.cliente)}<span class="sub2">${esc(c.telefone || 'sem telefone')}</span></td><td class="n">${esc(c.contrato || '—')}</td><td class="n">${fdate(c.venda)}</td><td class="r n">${brl(c.credito)}</td>
+      <td>${esc(c.vendedor)}<span class="sub2">adm: ${esc(c.adm)}</span></td>
+      <td><span class="pp">${[1, 2, 3, 4, 5].map(k => { const s = stView(c, k); return `<i class="s-${s}" title="${k}ª: ${s} · venc. ${fdate(venc(c, k))}">${k}</i>`; }).join('')}</span></td>
+      <td class="n">${x.prox ? `${x.prox}ª · ${fdate(venc(c, x.prox))}` : '—'}</td><td>${sitChip[situacaoCart(c)]}</td>
+      <td class="r n">${x.recebido ? brl(x.recebido, 2) : '—'}</td><td class="r n">${x.previsto ? `<strong>${brl(x.previsto, 2)}</strong>` : '—'}${x.semBaixa ? `<span class="sub2">+ ${brl(x.semBaixa, 2)} vencida sem baixa</span>` : ''}</td><td class="r n ${x.risco ? 'neg' : ''}">${x.risco ? '−' + brl(x.risco, 2) : '—'}</td></tr>`; }).join('') +
+    `<tr class="total"><td colspan="8">Total (${L.length} clientes)</td><td class="r n">${brl(soma(L, 'recebido'), 2)}</td><td class="r n">${brl(soma(L, 'previsto'), 2)}</td><td class="r n neg">${soma(L, 'risco') ? '−' + brl(soma(L, 'risco'), 2) : '—'}</td></tr>`
+    : `<tr><td colspan="11" class="empty">Nenhum cliente neste filtro.</td></tr>`;
+}
+['ctPessoa', 'ctFiltro'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('change', renderCarteira); });
+(() => { const el = document.getElementById('ctBusca'); if (el) el.addEventListener('input', renderCarteira); })();
+/* <<< CARTEIRA <<< */
 iniciar();
 })();

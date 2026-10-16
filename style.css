@@ -49,6 +49,7 @@ h1{font-size:26px;font-weight:800;letter-spacing:-.01em}
 h2{font-size:17px;font-weight:700}
 h3{font-size:15px;font-weight:700}
 .sub{color:var(--muted);font-size:14px}
+.sub2{display:block;color:var(--muted);font-size:11px;margin-top:2px}
 .eyebrow{font-family:var(--f-num);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
 

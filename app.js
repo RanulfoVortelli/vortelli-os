@@ -127,9 +127,10 @@ async function carregar(user) {
     $('login').hidden = true; $('app').hidden = false;
     $('quem').textContent = `${ME.nome} · ${funcaoNome(ME)}`;
     document.querySelectorAll('[data-gestor]').forEach(b => b.hidden = !GESTOR);
+    document.querySelectorAll('[data-fin]').forEach(b => b.hidden = !veComissoes());
     document.querySelectorAll('[data-pode-lancar]').forEach(b => b.hidden = !podeLancar());
-    $('navMinha').textContent = GESTOR ? 'Extrato individual' : 'Minha comissão';
-    $('mcPessoaL').hidden = !GESTOR; $('rkFull').hidden = !GESTOR; $('rkTvWrap').hidden = GESTOR;
+    $('navMinha').textContent = veComissoes() ? 'Extrato individual' : 'Minha comissão';
+    $('mcPessoaL').hidden = !veComissoes(); $('rkFull').hidden = !GESTOR; $('rkTvWrap').hidden = GESTOR;
     initFiltros(); renderRegras(); renderAll();
     let start = GESTOR ? 'painel' : 'minha';
     try { const v = localStorage.getItem('vos_view'); if (v && !(document.querySelector(`[data-view="${v}"]`) || {}).hidden) start = v; } catch (e) {}
@@ -160,6 +161,8 @@ const baseVenda = c => c.confirmadaEm && semanaDisal(c.confirmadaEm) > c.venda ?
 const dataParcela = (c, k) => c.disalEm && c.disalEm[k] ? semanaDisal(c.disalEm[k]) : venc(c, k);
 const soDig = s => String(s || '').replace(/\D/g, '');
 const fmtCpf = s => { const d = soDig(s); return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : (s || ''); };
+// Comissões da equipe e extrato de qualquer pessoa: CEO e gerente adm (financeiro)
+const veComissoes = () => GESTOR || (ME && ME.funcao === 'gerente_adm');
 const podeLancar = () => GESTOR || (ME && ['gerente', 'administrativo', 'gerente_adm'].includes(ME.funcao));
 const venc = (c, k) => c.venc[k] || addDays(c.venda, 30 * (k - 1));
 // Status mostrado: parcela vencida há mais de 3 dias sem baixa aparece como "atrasado"
@@ -344,7 +347,7 @@ function renderCotas() {
 
 function renderComissoes() {
   const sexta = new Date(+$('qSexta').value);
-  const ev = todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +sexta && (GESTOR || e.pessoa === ME.id || (ME.funcao === 'gerente')));
+  const ev = todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +sexta && (veComissoes() || e.pessoa === ME.id || (ME.funcao === 'gerente')));
   const map = {};
   ev.forEach(e => { const m = map[e.pessoa] ||= { id: e.pessoa, cotas: new Set(), com: 0, est: 0, desc: 0 }; if (e.tipo === 'com' || e.tipo === 'rec') { m.com += e.valor; if (e.tipo === 'com') m.cotas.add(e.cota.id); } else if (e.tipo === 'desc') m.desc += e.valor; else m.est += e.valor; });
   const tot = x => x.com + x.est + x.desc;
@@ -498,10 +501,10 @@ function renderRanking() {
 const tipoLanc = e => e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : 'Venda');
 function renderMinha() {
   if (!ME || !$('mcSexta').value) return;
-  if (GESTOR && !$('mcPessoa').value) return;
-  const alvo = GESTOR ? pessoaPorId($('mcPessoa').value) : ME;
+  if (veComissoes() && !$('mcPessoa').value) return;
+  const alvo = veComissoes() ? pessoaPorId($('mcPessoa').value) : ME;
   if (!alvo) return;
-  $('mcTitulo').textContent = GESTOR ? `Extrato de ${alvo.nome}` : 'Minha comissão';
+  $('mcTitulo').textContent = veComissoes() && alvo.id !== ME.id ? `Extrato de ${alvo.nome}` : 'Minha comissão';
   const sexta = new Date(+$('mcSexta').value);
   const meus = todosEventosEquipe().filter(e => e.pessoa === alvo.id);
   const daSexta = meus.filter(e => +sextaPagamento(e.data) === +sexta).sort((a, b) => a.data - b.data);

@@ -31,7 +31,7 @@ const sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY)
 /* ---------------- Estado ---------------- */
 let ME = null, GESTOR = false;
 const PCOLS = 'id,nome,apelido,funcao,equipe_id,ativo,data_saida,fechador,gerente_geral,user_id';
-let EQUIPES = [], PESSOAS = [], R = {}, COTAS = [], LANC = [];
+let EQUIPES = [], PESSOAS = [], R = {}, COTAS = [], LANC = [], TRAF = [], DESC = [];
 const r = k => (R[k] ? Number(R[k].valor) : 0);
 const funcaoNome = p => p && p.gerente_geral ? 'Gerente geral' : (FUNCAO[p && p.funcao] || '—');
 const salarioDe = p => !p.ativo ? 0 : p.salario != null ? Number(p.salario) : (p.funcao === 'administrativo' ? r('salario_minimo') : 0);
@@ -119,6 +119,7 @@ async function carregar(user) {
     const contatos = new Set((cn.data || []).map(x => x.cota_id));
     COTAS = ct.map(c => montarCota(c, contatos));
     LANC = (lc.data || []).map(l => ({ ...l, data: parseD(l.data), valor: Number(l.valor) }));
+    await carregarTrafego();
     $('login').hidden = true; $('app').hidden = false;
     $('quem').textContent = `${ME.nome} · ${funcaoNome(ME)}`;
     document.querySelectorAll('[data-gestor]').forEach(b => b.hidden = !GESTOR);
@@ -239,7 +240,7 @@ function bonusGerenteGeral() {
     return { pessoa: gg.id, papel: 'Gerente geral', data: addDays(fim, 7), valor: n * r('gg_por_cota'), tipo: 'com', cota: { id: 'gg' + ym } };
   }).filter(e => ativoEm(e.pessoa, e.data));
 }
-const todosEventosEquipe = () => COTAS.flatMap(eventosEquipe).concat(bonusGerenteGeral());
+const todosEventosEquipe = () => COTAS.flatMap(eventosEquipe).concat(bonusGerenteGeral(), eventosDescontos());
 function mesResumo(ym) {
   const vendas = COTAS.filter(c => valida(c) && noMes(c.venda, ym));
   let disal = 0, entrada = 0, equipe = 0;
@@ -247,7 +248,7 @@ function mesResumo(ym) {
     eventosLoja(c).forEach(e => { if (noMes(e.data, ym) && e.data <= TODAY && !e.previsto) { if (e.tipo === 'disal') disal += e.valor; else entrada += e.valor; } });
     eventosEquipe(c).forEach(e => { if (noMes(e.data, ym) && e.data <= TODAY) equipe += e.valor; });
   });
-  bonusGerenteGeral().forEach(e => { if (noMes(e.data, ym) && e.data <= TODAY) equipe += e.valor; });
+  bonusGerenteGeral().concat(eventosDescontos()).forEach(e => { if (noMes(e.data, ym) && e.data <= TODAY) equipe += e.valor; });
   return { vendas, disal, entrada, imp: Math.max(0, disal) * r('imposto') / 100, equipe };
 }
 function despesasMes(ym) {
@@ -333,13 +334,14 @@ function renderComissoes() {
   const sexta = new Date(+$('qSexta').value);
   const ev = todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +sexta && (GESTOR || e.pessoa === ME.id || (ME.funcao === 'gerente')));
   const map = {};
-  ev.forEach(e => { const m = map[e.pessoa] ||= { id: e.pessoa, cotas: new Set(), com: 0, est: 0 }; if (e.tipo === 'com' || e.tipo === 'rec') { m.com += e.valor; if (e.tipo === 'com') m.cotas.add(e.cota.id); } else m.est += e.valor; });
-  const lista = Object.values(map).sort((a, b) => (b.com + b.est) - (a.com + a.est));
-  const tc = lista.reduce((s, x) => s + x.com, 0), te = lista.reduce((s, x) => s + x.est, 0);
-  $('kpisCom').innerHTML = kpi('Comissões', brl(tc)) + kpi('Estornos', `<span class="neg">${brl(te)}</span>`) + kpi('Total a pagar', brl(tc + te)) + kpi('Pessoas', lista.length);
-  $('tbCom').innerHTML = lista.length ? lista.map(x => { const p = pessoaPorId(x.id) || {}; return `<tr><td>${esc(p.nome)}</td><td>${funcaoNome(p)}</td><td>${esc(equipeNome(p.equipe_id))}</td><td class="r n">${x.cotas.size}</td><td class="r n">${brl(x.com, 2)}</td><td class="r n ${x.est ? 'neg' : ''}">${x.est ? brl(x.est, 2) : '—'}</td><td class="r n"><strong>${brl(x.com + x.est, 2)}</strong></td></tr>`; }).join('') +
-    `<tr class="total"><td colspan="4">Total</td><td class="r n">${brl(tc, 2)}</td><td class="r n neg">${brl(te, 2)}</td><td class="r n">${brl(tc + te, 2)}</td></tr>`
-    : `<tr><td colspan="7" class="empty">Nada a pagar nesta sexta.</td></tr>`;
+  ev.forEach(e => { const m = map[e.pessoa] ||= { id: e.pessoa, cotas: new Set(), com: 0, est: 0, desc: 0 }; if (e.tipo === 'com' || e.tipo === 'rec') { m.com += e.valor; if (e.tipo === 'com') m.cotas.add(e.cota.id); } else if (e.tipo === 'desc') m.desc += e.valor; else m.est += e.valor; });
+  const tot = x => x.com + x.est + x.desc;
+  const lista = Object.values(map).sort((a, b) => tot(b) - tot(a));
+  const tc = lista.reduce((s, x) => s + x.com, 0), te = lista.reduce((s, x) => s + x.est, 0), td = lista.reduce((s, x) => s + x.desc, 0);
+  $('kpisCom').innerHTML = kpi('Comissões', brl(tc)) + kpi('Estornos', `<span class="neg">${brl(te)}</span>`) + kpi('Descontos', `<span class="neg">${brl(td)}</span>`, 'Tráfego pago e débitos') + kpi('Total a pagar', brl(tc + te + td)) + kpi('Pessoas', lista.length);
+  $('tbCom').innerHTML = lista.length ? lista.map(x => { const p = pessoaPorId(x.id) || {}; return `<tr><td>${esc(p.nome)}</td><td>${funcaoNome(p)}</td><td>${esc(equipeNome(p.equipe_id))}</td><td class="r n">${x.cotas.size}</td><td class="r n">${brl(x.com, 2)}</td><td class="r n ${x.est ? 'neg' : ''}">${x.est ? brl(x.est, 2) : '—'}</td><td class="r n ${x.desc ? 'neg' : ''}">${x.desc ? brl(x.desc, 2) : '—'}</td><td class="r n ${tot(x) < 0 ? 'neg' : ''}"><strong>${brl(tot(x), 2)}</strong></td></tr>`; }).join('') +
+    `<tr class="total"><td colspan="4">Total</td><td class="r n">${brl(tc, 2)}</td><td class="r n neg">${brl(te, 2)}</td><td class="r n neg">${brl(td, 2)}</td><td class="r n">${brl(tc + te + td, 2)}</td></tr>`
+    : `<tr><td colspan="8" class="empty">Nada a pagar nesta sexta.</td></tr>`;
 }
 
 function renderAlertas() {
@@ -481,7 +483,7 @@ function renderRanking() {
   }).join('');
 }
 /* ---------------- Minha comissão (extrato individual) ---------------- */
-const tipoLanc = e => e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : 'Venda');
+const tipoLanc = e => e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : 'Venda');
 function renderMinha() {
   if (!ME || !$('mcSexta').value) return;
   if (GESTOR && !$('mcPessoa').value) return;
@@ -492,20 +494,20 @@ function renderMinha() {
   const meus = todosEventosEquipe().filter(e => e.pessoa === alvo.id);
   const daSexta = meus.filter(e => +sextaPagamento(e.data) === +sexta).sort((a, b) => a.data - b.data);
   const soma = l => l.reduce((s, e) => s + e.valor, 0);
-  const com = soma(daSexta.filter(e => e.valor > 0)), est = soma(daSexta.filter(e => e.valor < 0));
+  const com = soma(daSexta.filter(e => e.valor > 0)), est = soma(daSexta.filter(e => e.valor < 0 && e.tipo !== 'desc')), dsc = soma(daSexta.filter(e => e.tipo === 'desc'));
   const ymS = ymOf(sexta), noMesPag = meus.filter(e => ymOf(sextaPagamento(e.data)) === ymS);
   const minhasPartes = c => partesVenda(c).partes.filter(x => x.pessoa === alvo.id).reduce((s, x) => s + x.valor, 0);
   const aguard = COTAS.filter(c => valida(c) && !c.confirmada).map(c => ({ c, v: minhasPartes(c) })).filter(x => x.v > 0);
   const risco = alertasLista().map(c => ({ c, v: minhasPartes(c) * r('estorno_equipe') / 100 })).filter(x => x.v > 0);
   $('kpisMc').innerHTML =
-    kpi(`A receber em ${fdate(sexta)}`, brl(com + est, 2), `${daSexta.filter(e => e.tipo === 'com').length} lançamentos`) +
-    kpi('Comissões', brl(com, 2), est ? `Estornos ${brl(est, 2)}` : 'Sem estornos nesta sexta') +
+    kpi(`A receber em ${fdate(sexta)}`, brl(com + est + dsc, 2), `${daSexta.filter(e => e.tipo === 'com').length} lançamentos`) +
+    kpi('Comissões', brl(com, 2), [est ? `Estornos ${brl(est, 2)}` : 'Sem estornos', dsc ? `Descontos ${brl(dsc, 2)}` : ''].filter(Boolean).join(' · ')) +
     kpi(`Total de ${MESES[ymS % 12]}`, brl(soma(noMesPag), 2), 'Somando todas as sextas do mês') +
     kpi('Aguardando a Disal', brl(aguard.reduce((s, x) => s + x.v, 0), 2), `${aguard.length} ${aguard.length === 1 ? 'venda' : 'vendas'} ainda sem confirmação`);
   $('tbMc').innerHTML = daSexta.length ? daSexta.map(e => {
     const c = e.cota || {}; const gg = String(c.id || '').startsWith('gg');
     return `<tr><td class="n">${fdate(e.data)}</td><td>${gg ? 'Loja: meta de cotas do mês' : esc(c.cliente || '—')}</td><td class="n">${esc(c.contrato || '—')}</td><td>${esc(e.papel)}</td><td>${tipoLanc(e)}</td><td class="r n">${c.credito ? brl(c.credito) : '—'}</td><td class="r n ${e.valor < 0 ? 'neg' : ''}"><strong>${brl(e.valor, 2)}</strong></td></tr>`;
-  }).join('') + `<tr class="total"><td colspan="6">Total da sexta</td><td class="r n">${brl(com + est, 2)}</td></tr>`
+  }).join('') + `<tr class="total"><td colspan="6">Total da sexta</td><td class="r n">${brl(com + est + dsc, 2)}</td></tr>`
     : `<tr><td colspan="7" class="empty">Nada a receber nesta sexta.</td></tr>`;
   $('mcRisco').innerHTML = risco.length ? risco.map(({ c, v }) => `<div class="row"><div class="l">${esc(c.cliente)}<span>2ª vence ${fdate(venc(c, 2))} · ${esc(c.telefone || 'sem telefone')}${stView(c, 2) === 'atrasado' ? ' · <b class="neg">vencida</b>' : ''}</span></div><b class="neg">−${brl(v, 2)}</b></div>`).join('') : '<p class="note">Nenhum cliente seu em risco agora.</p>';
   $('mcAguard').innerHTML = aguard.length ? aguard.map(({ c, v }) => `<div class="row"><div class="l">${esc(c.cliente)}<span>venda ${fdate(c.venda)} · ${brl(c.credito)}</span></div><b>${brl(v, 2)}</b></div>`).join('') : '<p class="note">Nenhuma venda sua aguardando.</p>';
@@ -527,7 +529,7 @@ function initFiltros() {
   $('fAdm').innerHTML = '<option value="">Sem carteira</option>' + opt(ativos.filter(p => ['administrativo', 'gerente_adm'].includes(p.funcao)));
   $('fData').value = iso(TODAY); $('lData').value = iso(TODAY);
 }
-function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); renderUsuarios(); renderRanking(); renderMinha(); }
+function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); renderUsuarios(); renderRanking(); renderMinha(); renderTrafego(); }
 function go(view) {
   if (view === 'conferencia') abrirConferencia();
   if (view === 'ranking' && !GESTOR && !$('rkTv').src) $('rkTv').src = 'tv.html?embed=1';
@@ -1076,5 +1078,194 @@ secConf.addEventListener('dragover', e => { e.preventDefault(); secConf.classLis
 secConf.addEventListener('dragleave', e => { if (!secConf.contains(e.relatedTarget)) secConf.classList.remove('cf-arrastando'); });
 secConf.addEventListener('drop', e => { e.preventDefault(); secConf.classList.remove('cf-arrastando'); lerArquivo(e.dataTransfer.files[0]); });
 
+/* >>> TRAFEGO >>> */
+/* ---------------- Tráfego pago (Meta) e descontos na comissão ---------------- */
+// Gasto de cada consultor por dia. A semana (segunda a domingo) é descontada na sexta da semana seguinte,
+// a mesma sexta em que as vendas daquela semana são pagas. Percentual em Regras (trafego_desconto).
+const TR = { prev: null, vinc: null };
+const pctTr = () => (R.trafego_desconto ? r('trafego_desconto') : 100) / 100;
+const segundaDe = d => addDays(d, -((d.getDay() + 6) % 7));
+const tira = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+async function carregarTrafego() {
+  try {
+    const [tg, ds] = await Promise.all([
+      tudo(() => sb.from('trafego_gastos').select('id,data,bm,campanha,conjunto,anuncio,pessoa_id,gasto,leads').order('data')),
+      sb.from('descontos').select('*').order('data')
+    ]);
+    if (ds.error) throw ds.error;
+    TRAF = tg.map(t => ({ ...t, gasto: Number(t.gasto), leads: Number(t.leads) }));
+    DESC = (ds.data || []).map(x => ({ ...x, valor: Number(x.valor) }));
+  } catch (e) { console.warn('Tráfego ainda não disponível:', e.message || e); TRAF = []; DESC = []; }
+}
+function eventosDescontos() {
+  const pct = pctTr(), sem = {}, ev = [];
+  TRAF.forEach(t => {
+    if (!t.pessoa_id || !t.gasto) return;
+    const seg = segundaDe(parseD(t.data)), k = t.pessoa_id + '|' + iso(seg);
+    (sem[k] ||= { pessoa: t.pessoa_id, seg, gasto: 0 }).gasto += t.gasto;
+  });
+  Object.values(sem).forEach(s => ev.push({ pessoa: s.pessoa, papel: 'Tráfego pago', data: s.seg, valor: -Math.round(s.gasto * pct * 100) / 100, tipo: 'desc',
+    cota: { id: 'tr' + s.pessoa + iso(s.seg), cliente: `Tráfego pago ${fdate(s.seg)} a ${fdate(addDays(s.seg, 6))}` } }));
+  DESC.forEach(x => ev.push({ pessoa: x.pessoa_id, papel: 'Desconto', data: parseD(x.data), valor: -x.valor, tipo: 'desc', cota: { id: 'ds' + x.id, cliente: x.descricao || 'Desconto' } }));
+  return ev.filter(e => ativoEm(e.pessoa, e.data));
+}
+
+/* Tela */
+function renderTrafego() {
+  if (!ME || !$('trSemana')) return;
+  if (!$('trSemana').options.length) {
+    const seg = segundaDe(TODAY);
+    $('trSemana').innerHTML = Array.from({ length: 12 }, (_, i) => addDays(seg, -7 * i)).map((d, i) => `<option value="${+d}">${fdate(d)} a ${fdate(addDays(d, 6))}${i === 0 ? ' (esta semana)' : ''}</option>`).join('');
+  }
+  const ini = new Date(+$('trSemana').value), fim = addDays(ini, 6), sexta = sextaPagamento(ini), pct = pctTr();
+  const doPer = TRAF.filter(t => { const d = parseD(t.data); return d >= ini && d <= fim; });
+  const por = {};
+  doPer.forEach(t => { const m = por[t.pessoa_id || ''] ||= { id: t.pessoa_id || '', gasto: 0, leads: 0 }; m.gasto += t.gasto; m.leads += t.leads; });
+  const vendasDe = id => COTAS.filter(c => valida(c) && c.vendedor_id === id && c.venda >= ini && c.venda <= fim).length;
+  const lista = Object.values(por).map(m => ({ ...m, vendas: m.id ? vendasDe(m.id) : 0 })).sort((a, b) => (!a.id) - (!b.id) || b.gasto - a.gasto);
+  const consult = lista.filter(m => m.id), g = lista.reduce((s, m) => s + m.gasto, 0), l = lista.reduce((s, m) => s + m.leads, 0), v = consult.reduce((s, m) => s + m.vendas, 0);
+  const desc = consult.reduce((s, m) => s + m.gasto * pct, 0);
+  const ultimo = TRAF.length ? TRAF.reduce((a, t) => t.data > a ? t.data : a, '') : null;
+  $('trSub').textContent = `Gasto de cada consultor na Meta. A semana é descontada da comissão na sexta seguinte (${fdate(sexta)}), junto com as vendas da semana.${ultimo ? ` Dados até ${dBR(ultimo)}.` : ''}`;
+  $('kpisTr').innerHTML = kpi('Gasto na semana', brl(g, 2), `${fdate(ini)} a ${fdate(fim)}`) + kpi('Leads', l.toLocaleString('pt-BR'), l ? `${brl(g / l, 2)} por lead` : 'sem leads') +
+    kpi('Vendas', v, v ? `${brl(consult.reduce((s, m) => s + m.gasto, 0) / v, 2)} de tráfego por venda` : 'nenhuma venda na semana') +
+    kpi(`Desconto em ${fdate(sexta)}`, brl(desc, 2), `${Math.round(pct * 100)}% do gasto de cada consultor`);
+  $('tbTr').innerHTML = lista.length ? lista.map(m => {
+    const p = pessoaPorId(m.id) || {};
+    return `<tr><td>${m.id ? esc(p.nome || '—') : '<span class="note">Sem consultor (a loja paga)</span>'}</td><td>${m.id ? esc(equipeNome(p.equipe_id)) : '—'}</td><td class="r n">${brl(m.gasto, 2)}</td><td class="r n">${m.leads}</td><td class="r n">${m.leads ? brl(m.gasto / m.leads, 2) : '—'}</td><td class="r n">${m.id ? m.vendas : '—'}</td><td class="r n">${m.vendas ? brl(m.gasto / m.vendas, 2) : '—'}</td><td class="r n ${m.id ? 'neg' : ''}">${m.id ? brl(-m.gasto * pct, 2) : '—'}</td></tr>`;
+  }).join('') + `<tr class="total"><td colspan="2">Total</td><td class="r n">${brl(g, 2)}</td><td class="r n">${l}</td><td class="r n">${l ? brl(g / l, 2) : '—'}</td><td class="r n">${v}</td><td></td><td class="r n neg">${brl(-desc, 2)}</td></tr>`
+    : `<tr><td colspan="8" class="empty">${GESTOR ? 'Nenhum gasto nesta semana. Suba o relatório exportado do Gerenciador de Anúncios.' : 'Nenhum gasto de tráfego seu nesta semana.'}</td></tr>`;
+  renderDescontos();
+}
+function renderDescontos() {
+  if (!GESTOR || !$('dPessoa')) return;
+  if (!$('dPessoa').options.length) {
+    $('dPessoa').innerHTML = PESSOAS.filter(p => p.ativo && !['ceo', 'tv'].includes(p.funcao)).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => `<option value="${p.id}">${esc(p.nome)}</option>`).join('');
+    const s0 = sextaApos(addDays(TODAY, -1));
+    $('dSexta').innerHTML = Array.from({ length: 10 }, (_, i) => addDays(s0, 7 * i)).map(d => `<option value="${+d}">${d.toLocaleDateString('pt-BR')}</option>`).join('');
+  }
+  const seg = segundaDe(addDays(TODAY, -7));
+  const fut = DESC.filter(x => parseD(x.data) >= seg).sort((a, b) => a.data < b.data ? -1 : 1);
+  $('dLista').innerHTML = fut.length ? fut.map(x => `<div class="row"><div class="l">${esc((pessoaPorId(x.pessoa_id) || {}).nome || '—')}<span>${esc(x.descricao || 'Desconto')} · sexta ${fdate(sextaPagamento(parseD(x.data)))}</span></div><b class="neg">−${brl(x.valor, 2)}</b> <button type="button" class="btn ghost sm" data-tr="del:${x.id}">Excluir</button></div>`).join('')
+    : '<p class="note">Nenhum desconto lançado para as próximas sextas.</p>';
+}
+
+/* Relatório exportado do Gerenciador de Anúncios (Excel ou CSV) */
+const numMeta = v => typeof v === 'number' ? v : (() => { const s = String(v ?? '').replace(/[R$\s]/g, ''); if (!s) return 0; return Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s) || 0; })();
+const dataMeta = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v.trim()) ? v.trim().slice(0, 10) : dataBR(v);
+function lerPlanilhaMeta(rows, arquivo) {
+  const hi = rows.findIndex(r => r.some(c => /^(valor usado|amount spent|gasto)/.test(tira(c))));
+  if (hi < 0) return [];
+  const h = rows[hi].map(tira), col = (...res) => h.findIndex(c => res.some(re => re.test(c)));
+  const cG = col(/^valor usado/, /^amount spent/, /^gasto/), cCa = col(/nome da campanha/, /campaign name/, /^campanha/), cCj = col(/nome do conjunto/, /ad set name/, /^conjunto/),
+    cAn = col(/nome do anuncio/, /^ad name/, /^anuncio/), cCo = col(/nome da conta/, /account name/, /^conta/), cDia = col(/^dia$/, /^day$/, /^data$/),
+    cIni = col(/inicio dos relatorios/, /reporting starts/), cFim = col(/termino dos relatorios/, /reporting ends/);
+  let cL = col(/^leads/, /^cadastros/, /^lead /); if (cL < 0) cL = col(/^resultados$/, /^results$/, /conversas/);
+  const txt = (r, c) => c >= 0 ? String(r[c] ?? '').trim() : '', bmPadrao = arquivo.replace(/\.[^.]+$/, ''), out = [];
+  for (const r of rows.slice(hi + 1)) {
+    const camp = txt(r, cCa), conj = txt(r, cCj), anun = txt(r, cAn);
+    if (!camp && !conj && !anun) continue;   // linha de total
+    const gasto = numMeta(r[cG]), leads = cL >= 0 ? Math.round(numMeta(r[cL])) : 0;
+    if (!gasto && !leads) continue;
+    const d1 = dataMeta(cDia >= 0 ? r[cDia] : r[cIni]); if (!d1) continue;
+    const d2 = (cDia >= 0 ? d1 : dataMeta(r[cFim])) || d1;
+    const dias = []; for (let d = parseD(d1); d <= parseD(d2) && dias.length < 62; d = addDays(d, 1)) dias.push(iso(d));
+    const parte = Math.floor(gasto / dias.length * 100) / 100;
+    dias.forEach((d, i) => out.push({ data: d, bm: txt(r, cCo) || bmPadrao, campanha: camp, conjunto: conj, anuncio: anun,
+      gasto: i === dias.length - 1 ? Math.round((gasto - parte * (dias.length - 1)) * 100) / 100 : parte, leads: i === dias.length - 1 ? leads : 0 }));
+  }
+  return out;
+}
+function sugerirConsultor(txt) {
+  const t = ' ' + normNome(txt) + ' ', cands = PESSOAS.filter(p => p.ativo && ['vendedor', 'gerente'].includes(p.funcao));
+  const unico = f => { const m = cands.filter(f); return m.length === 1 ? m[0].id : ''; };
+  return unico(p => { const n = normNome(p.nome).split(' '); return n.length > 1 && t.includes(` ${n[0]} ${n[1]} `); })
+      || unico(p => p.apelido && t.includes(` ${normNome(p.apelido)} `))
+      || unico(p => t.includes(` ${normNome(p.nome).split(' ')[0]} `));
+}
+function montarPrevia(linhas, arquivo) {
+  const agg = new Map();
+  linhas.forEach(x => { const k = [x.data, x.bm, x.campanha, x.conjunto, x.anuncio].join('\u0001'); const a = agg.get(k); if (a) { a.gasto += x.gasto; a.leads += x.leads; } else agg.set(k, { ...x }); });
+  const unidades = new Map();
+  [...agg.values()].forEach(x => {
+    const nome = x.conjunto || x.campanha || x.anuncio, k = x.bm + '\u0001' + nome;
+    const u = unidades.get(k) || { bm: x.bm, nome, campanha: x.campanha, linhas: [], gasto: 0, leads: 0, d1: x.data, d2: x.data };
+    u.linhas.push(x); u.gasto += x.gasto; u.leads += x.leads; if (x.data < u.d1) u.d1 = x.data; if (x.data > u.d2) u.d2 = x.data; unidades.set(k, u);
+  });
+  const lista = [...unidades.values()].sort((a, b) => a.bm.localeCompare(b.bm) || b.gasto - a.gasto);
+  lista.forEach(u => {
+    const ls = u.linhas, chaves = [u.nome, u.campanha, ...ls.map(x => x.anuncio)].filter(Boolean).map(tira);
+    u.pessoa = chaves.map(c => TR.vinc.get(c)).find(Boolean) || sugerirConsultor([u.nome, u.campanha, ls[0].anuncio].join(' ')) || '';
+    u.vinculado = !!chaves.map(c => TR.vinc.get(c)).find(Boolean);
+  });
+  return { arquivo, unidades: lista };
+}
+function renderPreviaTr() {
+  const p = TR.prev, el = $('trPrev');
+  if (!p) { el.innerHTML = ''; return; }
+  const ops = PESSOAS.filter(x => x.ativo && ['vendedor', 'gerente'].includes(x.funcao)).sort((a, b) => a.nome.localeCompare(b.nome));
+  const tot = p.unidades.reduce((s, u) => s + u.gasto, 0), sem = p.unidades.filter(u => !u.pessoa);
+  const d1 = p.unidades.reduce((a, u) => u.d1 < a ? u.d1 : a, '9999'), d2 = p.unidades.reduce((a, u) => u.d2 > a ? u.d2 : a, '');
+  el.innerHTML = `<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Conferir antes de gravar · ${esc(p.arquivo)}</h2><span class="note">${dBR(d1)} a ${dBR(d2)} · ${brl(tot, 2)} · ${p.unidades.length} anúncios/conjuntos</span></div>
+    <p class="note" style="margin:0 0 10px">Confira o consultor de cada linha. O sistema guarda a escolha e reconhece sozinho nos próximos relatórios.${sem.length ? ` <b class="neg">${sem.length} sem consultor</b>: se ficar assim, a loja paga.` : ''}</p>
+    <div class="tbl-wrap"><table><thead><tr><th>BM / conta</th><th>Campanha · conjunto</th><th>Período</th><th class="r">Gasto</th><th class="r">Leads</th><th>Consultor</th></tr></thead><tbody>
+    ${p.unidades.map((u, i) => `<tr><td>${esc(u.bm)}</td><td>${esc(u.campanha)}${u.nome !== u.campanha ? ` · <b>${esc(u.nome)}</b>` : ''}</td><td class="n">${dBR(u.d1)}${u.d2 !== u.d1 ? ' a ' + dBR(u.d2) : ''}</td><td class="r n">${brl(u.gasto, 2)}</td><td class="r n">${u.leads}</td>
+      <td><select data-tr-un="${i}"><option value="">Sem consultor (loja paga)</option>${ops.map(o => `<option value="${o.id}" ${o.id === u.pessoa ? 'selected' : ''}>${esc(o.nome)}</option>`).join('')}</select>${u.pessoa && !u.vinculado ? ' <span class="cf-tag">sugerido</span>' : ''}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="cf-btns" style="margin-top:12px"><button class="btn gold" type="button" data-tr="salvar">Gravar gastos</button><button class="btn ghost" type="button" data-tr="cancelar">Cancelar</button></div></div>`;
+}
+async function lerTrafego(file) {
+  if (!file || !GESTOR) return;
+  try {
+    await carregarScript(LIB_XLSX, 'XLSX');
+    if (!TR.vinc) { const { data, error } = await sb.from('trafego_vinculos').select('*'); if (error) throw error; TR.vinc = new Map((data || []).map(v => [v.chave, v.pessoa_id])); }
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' }), linhas = [];
+    wb.SheetNames.forEach(n => linhas.push(...lerPlanilhaMeta(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' }), file.name)));
+    if (!linhas.length) return toast('Não achei as colunas do Gerenciador de Anúncios (Valor usado, Nome da campanha, Dia). Exporte o relatório em Excel ou CSV.');
+    TR.prev = montarPrevia(linhas, file.name); renderPreviaTr(); $('trPrev').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { console.error(e); toast('Erro ao ler o arquivo: ' + (e.message || e)); }
+}
+async function salvarTrafego() {
+  const p = TR.prev; if (!p) return;
+  document.querySelectorAll('[data-tr-un]').forEach(s => { p.unidades[+s.dataset.trUn].pessoa = s.value; });
+  const vinc = [], rows = [];
+  p.unidades.forEach(u => {
+    if (u.pessoa) { vinc.push({ chave: tira(u.nome), pessoa_id: u.pessoa, updated_at: new Date().toISOString() }); TR.vinc.set(tira(u.nome), u.pessoa); }
+    u.linhas.forEach(x => rows.push({ data: x.data, bm: x.bm, campanha: x.campanha, conjunto: x.conjunto, anuncio: x.anuncio, pessoa_id: u.pessoa || null, gasto: Math.round(x.gasto * 100) / 100, leads: x.leads, fonte: 'relatorio', importado_em: new Date().toISOString() }));
+  });
+  if (vinc.length) { const { error } = await sb.from('trafego_vinculos').upsert(vinc, { onConflict: 'chave' }); if (error) return toast('Não foi possível salvar: ' + error.message); }
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await sb.from('trafego_gastos').upsert(rows.slice(i, i + 500), { onConflict: 'data,bm,campanha,conjunto,anuncio' });
+    if (error) return toast('Não foi possível salvar: ' + error.message);
+  }
+  TR.prev = null; renderPreviaTr(); await carregarTrafego(); renderAll();
+  toast(`Tráfego gravado: ${brl(rows.reduce((s, x) => s + x.gasto, 0), 2)} em ${rows.length} lançamentos diários.`);
+}
+async function lancarDesconto(ev) {
+  ev.preventDefault();
+  const pessoa = $('dPessoa').value, total = +$('dValor').value, vezes = Math.max(1, Math.min(104, +$('dVezes').value || 1)), desc = $('dDesc').value.trim();
+  if (!pessoa || !(total > 0)) return toast('Escolha a pessoa e o valor');
+  const sexta = new Date(+$('dSexta').value), parte = Math.floor(total / vezes * 100) / 100, rows = [];
+  for (let i = 0; i < vezes; i++) rows.push({ pessoa_id: pessoa, data: iso(addDays(sexta, 7 * i - 11)), tipo: 'debito', valor: i === vezes - 1 ? Math.round((total - parte * (vezes - 1)) * 100) / 100 : parte, descricao: vezes > 1 ? `${desc} (${i + 1}/${vezes})` : desc });
+  const { error } = await sb.from('descontos').insert(rows);
+  if (error) return toast('Não foi possível lançar: ' + error.message);
+  $('formDesc').reset(); $('dVezes').value = 1; await carregarTrafego(); renderAll();
+  toast(`Desconto lançado: ${vezes}× de ${brl(parte, 2)} a partir de ${sexta.toLocaleDateString('pt-BR')}`);
+}
+$('trSemana').addEventListener('change', renderTrafego);
+$('trArquivo').addEventListener('change', e => { lerTrafego(e.target.files[0]); e.target.value = ''; });
+$('formDesc').addEventListener('submit', lancarDesconto);
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-tr]'); if (!b) return;
+  const [acao, id] = b.dataset.tr.split(':');
+  if (acao === 'salvar') { b.disabled = true; await salvarTrafego(); b.disabled = false; }
+  if (acao === 'cancelar') { TR.prev = null; renderPreviaTr(); }
+  if (acao === 'del') {
+    const { error } = await sb.from('descontos').delete().eq('id', +id);
+    if (error) return toast('Não foi possível excluir: ' + error.message);
+    DESC = DESC.filter(x => x.id !== +id); renderAll(); toast('Desconto excluído');
+  }
+});
+/* <<< TRAFEGO <<< */
 iniciar();
 })();

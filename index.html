@@ -50,6 +50,7 @@
     <button data-view="comissoes" data-gestor>Comissões</button>
     <button data-view="conferencia" data-gestor>Conferência Disal</button>
     <button data-view="ranking">Ranking</button>
+    <button data-view="trafego">Tráfego pago</button>
     <button data-view="alertas">2ª parcela <span class="badge" id="badgeAlert">0</span></button>
     <button data-view="financeiro" data-gestor>Financeiro</button>
     <button data-view="equipes" data-gestor>Equipes</button>
@@ -143,7 +144,7 @@
       <label for="qSexta">Sexta de pagamento<select id="qSexta"></select></label>
     </div>
     <div class="kpis" id="kpisCom" style="margin-bottom:16px"></div>
-    <div class="tbl-wrap"><table><thead><tr><th>Pessoa</th><th>Função</th><th>Equipe</th><th class="r">Cotas</th><th class="r">Comissão</th><th class="r">Estornos</th><th class="r">A pagar</th></tr></thead><tbody id="tbCom"></tbody></table></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Pessoa</th><th>Função</th><th>Equipe</th><th class="r">Cotas</th><th class="r">Comissão</th><th class="r">Estornos</th><th class="r">Descontos</th><th class="r">A pagar</th></tr></thead><tbody id="tbCom"></tbody></table></div>
   </section>
 
   <section data-page="conferencia" hidden>
@@ -161,6 +162,28 @@
     </div>
     <div class="kpis" id="kpisAlert" style="margin-bottom:16px"></div>
     <div class="tbl-wrap"><table><thead><tr><th>Vencimento</th><th>Cliente</th><th>Telefone</th><th>Administrativo</th><th>Vendedor</th><th class="r">Parcela</th><th class="r so-ceo">Em risco</th><th>Situação</th><th>Ações</th></tr></thead><tbody id="tbAlert"></tbody></table></div>
+  </section>
+
+  <section data-page="trafego" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Meta Ads</span><h1>Tráfego pago</h1><p class="sub" id="trSub">Gasto de cada consultor na Meta.</p></div>
+      <div class="toolbar" style="align-items:flex-end"><label for="trSemana">Semana<select id="trSemana"></select></label><label class="btn gold" for="trArquivo" data-gestor style="cursor:pointer">Subir relatório da Meta<input type="file" id="trArquivo" accept=".xlsx,.xls,.csv" hidden></label></div>
+    </div>
+    <div id="trPrev"></div>
+    <div class="kpis" id="kpisTr" style="margin-bottom:16px"></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Consultor</th><th>Equipe</th><th class="r">Gasto</th><th class="r">Leads</th><th class="r">Custo por lead</th><th class="r">Vendas</th><th class="r">Tráfego por venda</th><th class="r">Desconto</th></tr></thead><tbody id="tbTr"></tbody></table></div>
+    <form class="panel" id="formDesc" data-gestor style="margin-top:16px">
+      <div class="panel-head"><h2>Descontos na comissão</h2><span class="note">Débitos da equipe (empréstimo, veículo comprado na loja). Sai da comissão na sexta escolhida.</span></div>
+      <div class="formgrid">
+        <label for="dPessoa">Pessoa<select id="dPessoa"></select></label>
+        <label for="dValor">Valor total (R$)<input id="dValor" type="number" min="0.01" step="0.01" required placeholder="0,00"></label>
+        <label for="dVezes">Em quantas sextas<input id="dVezes" type="number" min="1" max="104" value="1" required></label>
+        <label for="dSexta">Primeira sexta<select id="dSexta"></select></label>
+      </div>
+      <label for="dDesc">Descrição<input id="dDesc" required placeholder="Ex.: Empréstimo de 10/10"></label>
+      <div><button class="btn gold" type="submit">Lançar desconto</button></div>
+      <div class="list" id="dLista" style="margin-top:12px"></div>
+    </form>
   </section>
 
   <section data-page="financeiro" hidden>

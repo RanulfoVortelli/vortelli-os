@@ -142,14 +142,14 @@ function montarCota(c, contatos) {
     id: c.id, contrato: c.contrato, cliente: c.cliente, telefone: c.telefone, credito: Number(c.credito || 0), parcela: Number(c.parcela_valor || 0),
     venda: parseD(c.data_venda), venc, disalEm, p, status: c.status, estornoDoc: c.estorno_documento, recuperacao: parseD(c.recuperacao_data), equipeId: c.equipe_id,
     vendedor_id: c.vendedor_id, fechador_id: c.fechador_id, adm_id: c.adm_id,
-    cpf: c.cpf, grupo: c.grupo, cotaNum: c.cota, venc1: c.vencimento_1, login: c.login_disal,
+    cpf: c.cpf, grupo: c.grupo, cotaNum: c.cota, venc1: c.vencimento_1, login: c.login_disal, historico: !!c.historico,
     confirmada: c.disal_confirmada !== false, confirmadaEm: parseD(c.disal_confirmada_em) || parseD(c.data_venda),
     vendedor: nomeP(c.vendedor_id), fechador: nomeP(c.fechador_id), adm: c.adm_id ? nomeP(c.adm_id) : 'Sem carteira',
     equipe: equipeNome(c.equipe_id || (pessoaPorId(c.vendedor_id) || {}).equipe_id), contato: contatos.has(c.id)
   };
 }
 const valida = c => c.status !== 'cancelada' && c.credito > 0;
-const incompleta = c => valida(c) && (!c.contrato || !c.adm_id);
+const incompleta = c => valida(c) && !c.historico && (!c.contrato || !c.adm_id);
 // Base da comissão da venda: a data em que a Disal confirmou (ou a venda, se confirmou antes)
 const semanaDisal = d => addDays(d, -7);   // sextaPagamento(d - 7) = sexta da semana do borderô
 const baseVenda = c => c.confirmadaEm && semanaDisal(c.confirmadaEm) > c.venda ? semanaDisal(c.confirmadaEm) : c.venda;
@@ -296,7 +296,7 @@ function renderPainel() {
   const atras = al.filter(c => stView(c, 2) === 'atrasado').length;
   const prox = sextaApos(addDays(TODAY, -1));
   const aPagar = todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +prox).reduce((s, e) => s + e.valor, 0);
-  const semCarteira = COTAS.filter(c => valida(c) && !c.adm_id && c.p[5] !== 'pago').length;
+  const semCarteira = COTAS.filter(c => valida(c) && !c.historico && !c.adm_id && c.p[5] !== 'pago').length;
   const aguard = COTAS.filter(c => valida(c) && !c.confirmada).length;
   const pend = Object.values(R).filter(x => x.pendente).length;
   $('atencao').innerHTML = [

@@ -14,6 +14,10 @@ const TODAY = hoje();
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const ymOf = d => d.getFullYear() * 12 + d.getMonth();
 const ymLabel = ym => MESES[ym % 12].slice(0, 3) + '/' + String(Math.floor(ym / 12)).slice(2);
+// Quinzena: o ranking zera no dia 16 (1ª = dias 1 a 15, 2ª = dia 16 ao fim do mês). qz = ym * 2 + (0 ou 1)
+const qzOf = d => ymOf(d) * 2 + (d.getDate() > 15 ? 1 : 0);
+const naQz = (d, qz) => d && qzOf(d) === qz;
+const qzLabel = qz => { const ym = Math.floor(qz / 2), fim = new Date(Math.floor(ym / 12), ym % 12 + 1, 0).getDate(); return (qz % 2 ? `16 a ${fim}` : '1 a 15') + ' de ' + ymLabel(ym); };
 const parseD = s => { if (!s) return null; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const noMes = (d, ym) => d && ymOf(d) === ym;
@@ -429,46 +433,46 @@ async function convidar(p, email) {
   toast('Convite enviado para ' + email);
 }
 /* ---------------- Ranking e desempenho ---------------- */
-function statsVendedor(id, ym) {
-  const v = COTAS.filter(c => valida(c) && c.vendedor_id === id && noMes(c.venda, ym));
-  const canc = COTAS.filter(c => c.status === 'cancelada' && c.vendedor_id === id && noMes(c.venda, ym)).length;
+function statsVendedor(id, ym) {   // ym aqui é a quinzena (qz)
+  const v = COTAS.filter(c => valida(c) && c.vendedor_id === id && naQz(c.venda, ym));
+  const canc = COTAS.filter(c => c.status === 'cancelada' && c.vendedor_id === id && naQz(c.venda, ym)).length;
   const cred = v.reduce((s, c) => s + c.credito, 0);
   const decid = v.filter(c => c.p[2] === 'pago' || c.p[2] === 'nao_pago');
   const pagas = decid.filter(c => c.p[2] === 'pago').length;
-  const ant = [1, 2, 3].map(i => COTAS.filter(c => valida(c) && c.vendedor_id === id && noMes(c.venda, ym - i)).length);
+  const ant = [1, 2, 3].map(i => COTAS.filter(c => valida(c) && c.vendedor_id === id && naQz(c.venda, ym - i)).length);
   return { n: v.length, cred, ticket: v.length ? cred / v.length : 0, decid: decid.length, pagas, est: decid.length - pagas, canc, media3: (ant[0] + ant[1] + ant[2]) / 3 };
 }
 function renderRanking() {
   if (!$('rkMes').value) return;
-  const ym = +$('rkMes').value;
-  const meta = r('meta_cotas') || 0, times = EQUIPES.filter(e => e.nome !== 'Administrativo'), metaEq = Math.round(meta / (times.length || 1));
-  const vendasMes = COTAS.filter(c => valida(c) && noMes(c.venda, ym));
+  const qz = +$('rkMes').value, ym = Math.floor(qz / 2);
+  const metaMes = r('meta_cotas') || 0, meta = Math.round(metaMes / 2), times = EQUIPES.filter(e => e.nome !== 'Administrativo'), metaEq = Math.round(meta / (times.length || 1));
+  const vendasMes = COTAS.filter(c => valida(c) && naQz(c.venda, qz)), noMesTodo = COTAS.filter(c => valida(c) && noMes(c.venda, ym)).length;
   const ids = new Set(PESSOAS.filter(p => p.ativo && p.funcao === 'vendedor').map(p => p.id));
   vendasMes.forEach(c => c.vendedor_id && ids.add(c.vendedor_id));
-  const lista = [...ids].map(id => ({ p: pessoaPorId(id) || { nome: '—' }, ...statsVendedor(id, ym) }))
+  const lista = [...ids].map(id => ({ p: pessoaPorId(id) || { nome: '—' }, ...statsVendedor(id, qz) }))
     .sort((a, b) => b.n - a.n || b.cred - a.cred || a.p.nome.localeCompare(b.p.nome));
-  // Supervisor do mês: equipe com mais cotas
+  // Supervisor da quinzena: equipe com mais cotas
   const eqs = times.map(e => { const v = vendasMes.filter(c => c.equipe === e.nome); const sup = PESSOAS.find(p => p.equipe_id === e.id && p.funcao === 'gerente' && p.ativo); return { e, sup, n: v.length, cred: v.reduce((s, c) => s + c.credito, 0) }; })
     .sort((a, b) => b.n - a.n || b.cred - a.cred);
   const top = lista.filter(x => x.n > 0).slice(0, 3);
   const medal = (x, i) => `<div class="medal ${i === 0 ? 'p1' : ''}"><span class="pos">${i + 1}º lugar</span><span class="nm">${esc(x.p.nome)}</span><span class="st">${esc(equipeNome(x.p.equipe_id))}</span><span class="big">${x.n} <span style="font-size:14px;color:var(--muted)">cotas</span></span><span class="st">${brl(x.cred)} em crédito</span></div>`;
   const s0 = eqs[0];
-  $('podio').innerHTML = (top.length ? top.map(medal).join('') : '<div class="medal"><span class="st">Nenhuma venda neste mês.</span></div>') +
-    (s0 && s0.n ? `<div class="medal sup"><span class="pos">Supervisor do mês</span><span class="nm">${esc(s0.sup ? s0.sup.nome : '—')}</span><span class="st">Equipe ${esc(s0.e.nome)}</span><span class="big">${s0.n} <span style="font-size:14px;color:var(--muted)">cotas</span></span><span class="st">${brl(s0.cred)} em crédito</span></div>` : '');
+  $('podio').innerHTML = (top.length ? top.map(medal).join('') : '<div class="medal"><span class="st">Nenhuma venda nesta quinzena.</span></div>') +
+    (s0 && s0.n ? `<div class="medal sup"><span class="pos">Supervisor da quinzena</span><span class="nm">${esc(s0.sup ? s0.sup.nome : '—')}</span><span class="st">Equipe ${esc(s0.e.nome)}</span><span class="big">${s0.n} <span style="font-size:14px;color:var(--muted)">cotas</span></span><span class="st">${brl(s0.cred)} em crédito</span></div>` : '');
   const cred = vendasMes.reduce((s, c) => s + c.credito, 0);
   const decid = vendasMes.filter(c => c.p[2] === 'pago' || c.p[2] === 'nao_pago'), pagas = decid.filter(c => c.p[2] === 'pago').length;
   const ativos = lista.filter(x => x.n > 0).length;
   const ggMin = r('gg_min_cotas') || 80;
   $('kpisRank').innerHTML =
-    kpi('Cotas da loja', `${vendasMes.length} <span style="font-size:14px;color:var(--muted)">/ ${meta}</span>`, `${meta ? Math.round(vendasMes.length / meta * 100) : 0}% da meta`, `<div class="meter"><i style="width:${Math.min(100, meta ? vendasMes.length / meta * 100 : 0)}%"></i></div>`) +
+    kpi('Cotas na quinzena', `${vendasMes.length} <span style="font-size:14px;color:var(--muted)">/ ${meta}</span>`, `${meta ? Math.round(vendasMes.length / meta * 100) : 0}% da meta da quinzena · mês: ${noMesTodo} / ${metaMes}`, `<div class="meter"><i style="width:${Math.min(100, meta ? vendasMes.length / meta * 100 : 0)}%"></i></div>`) +
     kpi('Crédito vendido', brl(cred), `Ticket médio ${brl(vendasMes.length ? cred / vendasMes.length : 0)}`) +
     kpi('2ª parcela paga', decid.length ? `${Math.round(pagas / decid.length * 100)}%` : '—', decid.length ? `${pagas} de ${decid.length} com a 2ª já vencida` : 'Nenhuma 2ª vencida ainda') +
-    kpi('Vendedores que venderam', `${ativos} <span style="font-size:14px;color:var(--muted)">/ ${lista.length}</span>`, vendasMes.length >= ggMin ? `Bônus do gerente geral garantido (${ggMin}+)` : `Faltam ${ggMin - vendasMes.length} cotas para o bônus do gerente geral`);
-  $('rkMetaEq').textContent = `meta de ${metaEq} cotas por equipe`;
+    kpi('Vendedores que venderam', `${ativos} <span style="font-size:14px;color:var(--muted)">/ ${lista.length}</span>`, noMesTodo >= ggMin ? `Bônus do gerente geral garantido no mês (${ggMin}+)` : `Faltam ${ggMin - noMesTodo} cotas no mês para o bônus do gerente geral`);
+  $('rkMetaEq').textContent = `meta de ${metaEq} cotas por equipe na quinzena`;
   $('rkEquipes').innerHTML = eqs.map((x, i) => `<div class="row"><div class="l" style="flex:1"><strong>${i + 1}º ${esc(x.e.nome)}</strong><span>${esc(x.sup ? x.sup.nome : 'sem supervisor')} · ${brl(x.cred)}</span><div class="meter" style="margin-top:6px"><i style="width:${Math.min(100, metaEq ? x.n / metaEq * 100 : 0)}%"></i></div></div><b>${x.n} / ${metaEq}</b></div>`).join('');
   const fech = {}; vendasMes.forEach(c => { if (!c.fechador_id) return; const f = fech[c.fechador_id] ||= { n: 0, cred: 0, outra: 0 }; f.n++; f.cred += c.credito; const pv = pessoaPorId(c.vendedor_id), pf = pessoaPorId(c.fechador_id); if (pv && pf && pv.equipe_id !== pf.equipe_id) f.outra++; });
   const fl = Object.entries(fech).sort((a, b) => b[1].n - a[1].n || b[1].cred - a[1].cred);
-  $('rkFech').innerHTML = fl.length ? fl.map(([id, f], i) => `<div class="row"><div class="l">${i + 1}º ${esc(nomeP(id))}<span>${brl(f.cred)}${f.outra ? ` · ${f.outra} de outra equipe` : ''}</span></div><b>${f.n} ${f.n === 1 ? 'fechada' : 'fechadas'}</b></div>`).join('') : '<p class="note">Nenhuma venda fechada neste mês.</p>';
+  $('rkFech').innerHTML = fl.length ? fl.map(([id, f], i) => `<div class="row"><div class="l">${i + 1}º ${esc(nomeP(id))}<span>${brl(f.cred)}${f.outra ? ` · ${f.outra} de outra equipe` : ''}</span></div><b>${f.n} ${f.n === 1 ? 'fechada' : 'fechadas'}</b></div>`).join('') : '<p class="note">Nenhuma venda fechada nesta quinzena.</p>';
   const meses = [5, 4, 3, 2, 1, 0].map(i => ym - i);
   const cont = (eNome, m) => COTAS.filter(c => valida(c) && c.equipe === eNome && noMes(c.venda, m)).length;
   const maxC = Math.max(1, ...times.flatMap(e => meses.map(m => cont(e.nome, m))));
@@ -515,7 +519,8 @@ function renderMinha() {
 function initFiltros() {
   const yms = [...new Set(COTAS.map(c => ymOf(c.venda)).concat([ymNow]))].sort((a, b) => b - a);
   $('qMes').innerHTML = yms.map(ym => `<option value="${ym}">${ymLabel(ym)}</option>`).join('');
-  const rk = $('rkMes').value; $('rkMes').innerHTML = yms.map(ym => `<option value="${ym}">${ymLabel(ym)}</option>`).join(''); $('rkMes').value = rk || ymNow; if (!$('rkMes').value) $('rkMes').value = yms[0];
+  const qzs = [...new Set(COTAS.map(c => qzOf(c.venda)).concat([qzOf(TODAY)]))].sort((a, b) => b - a);
+  const rk = $('rkMes').value; $('rkMes').innerHTML = qzs.map(q => `<option value="${q}">${qzLabel(q)}${q === qzOf(TODAY) ? ' (atual)' : ''}</option>`).join(''); $('rkMes').value = rk || qzOf(TODAY); if (!$('rkMes').value) $('rkMes').value = qzs[0];
   $('qEquipe').innerHTML = '<option value="">Todas</option>' + EQUIPES.filter(e => e.nome !== 'Administrativo').map(e => `<option>${esc(e.nome)}</option>`).join('');
   const sextas = []; let s = addDays(sextaApos(addDays(TODAY, -1)), 7); for (let i = 0; i < 10; i++) { sextas.push(s); s = addDays(s, -7); }
   const mcS = $('mcSexta').value;

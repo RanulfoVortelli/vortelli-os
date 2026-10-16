@@ -144,7 +144,7 @@ body.idle .fs{opacity:0}
   </header>
   <main>
     <section class="card">
-      <h2><span>Corrida do mês</span><em>cotas vendidas</em></h2>
+      <h2><span id="corridaTit">Corrida da quinzena</span><em>cotas vendidas</em></h2>
       <div class="race" id="race"></div>
     </section>
     <div class="side">
@@ -153,7 +153,7 @@ body.idle .fs{opacity:0}
         <div class="teams" id="teams"></div>
       </section>
       <section class="card meta">
-        <h2><span>Meta da loja</span><em id="pctMeta"></em></h2>
+        <h2><span>Meta da loja no mês</span><em id="pctMeta"></em></h2>
         <div class="big"><b id="lojaN">0</b><span id="lojaMeta">/ 0</span></div>
         <div class="mbar"><i id="lojaBar"></i><div class="mark" id="ggMark"><span>bônus 80</span></div></div>
         <div class="facts" style="margin-top:1vh">
@@ -220,10 +220,12 @@ const cotasDoMes = base;
 
 function render() {
   const hoje = new Date(), ym = hoje.getMonth();
-  const v = COTAS.filter(valida);
-  $('mesTitulo').textContent = `Ranking de ${MESES[ym]}`;
-  const fim = new Date(hoje.getFullYear(), ym + 1, 0), dias = fim.getDate() - hoje.getDate();
-  $('diasRest').textContent = dias === 0 ? 'último dia do mês' : `${dias} ${dias === 1 ? 'dia' : 'dias'} para fechar o mês`;
+  // Ranking por quinzena: zera no dia 16 e no dia 1º. Meta da loja e bônus do gerente geral continuam mensais.
+  const q2 = hoje.getDate() > 15, qIni = iso(new Date(hoje.getFullYear(), ym, q2 ? 16 : 1));
+  const vMes = COTAS.filter(valida), v = vMes.filter(c => c.data_venda >= qIni);
+  $('mesTitulo').textContent = `Ranking da ${q2 ? '2ª' : '1ª'} quinzena de ${MESES[ym]}`;
+  const fim = new Date(hoje.getFullYear(), ym + 1, 0), dias = fim.getDate() - hoje.getDate(), diasQ = (q2 ? fim.getDate() : 15) - hoje.getDate();
+  $('diasRest').textContent = diasQ === 0 ? 'último dia da quinzena' : `${diasQ} ${diasQ === 1 ? 'dia' : 'dias'} para fechar a quinzena`;
   // Corrida
   const por = {};
   v.forEach(c => { if (!c.vendedor_id) return; const x = por[c.vendedor_id] ||= { id: c.vendedor_id, n: 0, cred: 0, hoje: 0 }; x.n++; x.cred += Number(c.credito); if (c.data_venda === iso(hoje)) x.hoje++; });
@@ -251,16 +253,16 @@ function render() {
     el.querySelector('.num').textContent = x.n;
   });
   let more = race.querySelector('.more');
-  if (lista.length > N) { if (!more) { more = document.createElement('div'); more.className = 'more'; race.appendChild(more); } more.textContent = `+ ${lista.length - N} vendedores com vendas no mês`; } else if (more) more.remove();
-  if (!lista.length) race.innerHTML = '<div class="more" style="top:40%">Nenhuma venda ainda neste mês. Quem abre o placar?</div>';
+  if (lista.length > N) { if (!more) { more = document.createElement('div'); more.className = 'more'; race.appendChild(more); } more.textContent = `+ ${lista.length - N} vendedores com vendas na quinzena`; } else if (more) more.remove();
+  if (!lista.length) race.innerHTML = '<div class="more" style="top:40%">Nenhuma venda ainda nesta quinzena. Quem abre o placar?</div>';
   // Equipes
-  const meta = R.meta_cotas || 0, metaEq = Math.round(meta / (EQUIPES.length || 1));
-  $('metaEq').textContent = `meta ${metaEq} cada`;
+  const meta = R.meta_cotas || 0, metaEq = Math.round(meta / 2 / (EQUIPES.length || 1));
+  $('metaEq').textContent = `meta ${metaEq} cada na quinzena`;
   const eqs = EQUIPES.map(e => { const ve = v.filter(c => (equipeDe(c) || {}).id === e.id); const sup = PESSOAS.find(p => p.equipe_id === e.id && p.funcao === 'gerente' && p.ativo); return { e, sup, n: ve.length, cred: ve.reduce((s, c) => s + Number(c.credito), 0) }; })
     .sort((a, b) => b.n - a.n || b.cred - a.cred);
   $('teams').innerHTML = eqs.map((x, i) => `<div class="team ${i === 0 && x.n ? 'lead' : ''}" style="--tc:${corEq(x.e)}"><div class="tn"><span>${esc(x.e.nome)}</span>${i === 0 && x.n ? '<span class="crown">👑</span>' : `<span style="font-family:var(--f-n);font-size:1.8vh;color:var(--muted)">${i + 1}º</span>`}</div><div class="tv-n">${x.n} <small>/ ${metaEq}</small></div><div class="bar"><i style="width:${Math.min(100, metaEq ? x.n / metaEq * 100 : 0)}%"></i></div><div class="sup">${esc(x.sup ? primeiroNome(x.sup.nome) : '')} · ${brlK(x.cred)}</div></div>`).join('');
   // Meta da loja
-  const n = v.length, cred = v.reduce((s, c) => s + Number(c.credito), 0), gg = R.gg_min_cotas || 80;
+  const n = vMes.length, cred = vMes.reduce((s, c) => s + Number(c.credito), 0), gg = R.gg_min_cotas || 80;
   $('lojaN').textContent = n; $('lojaMeta').textContent = `/ ${meta}`;
   $('pctMeta').textContent = meta ? `${Math.round(n / meta * 100)}%` : '';
   $('lojaBar').style.width = Math.min(100, meta ? n / meta * 100 : 0) + '%';

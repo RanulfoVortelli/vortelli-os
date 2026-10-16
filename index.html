@@ -207,8 +207,8 @@
 
   <section data-page="ranking" hidden>
     <div class="top" style="margin-bottom:16px">
-      <div><span class="eyebrow">Desempenho</span><h1>Ranking</h1><p class="sub" id="subRank">Critério: cotas válidas no mês (canceladas não contam). Empate: maior crédito vendido.</p></div>
-      <div class="toolbar" style="align-items:flex-end"><label for="rkMes" data-gestor>Mês<select id="rkMes"></select></label><a class="btn gold" href="tv.html" target="_blank" rel="noopener" style="text-decoration:none">Abrir na TV</a></div>
+      <div><span class="eyebrow">Desempenho</span><h1>Ranking</h1><p class="sub" id="subRank">Ranking por quinzena: zera no dia 16 e no dia 1º. Critério: cotas válidas (canceladas não contam). Empate: maior crédito vendido.</p></div>
+      <div class="toolbar" style="align-items:flex-end"><label for="rkMes" data-gestor>Quinzena<select id="rkMes"></select></label><a class="btn gold" href="tv.html" target="_blank" rel="noopener" style="text-decoration:none">Abrir na TV</a></div>
     </div>
     <div id="rkTvWrap" hidden style="aspect-ratio:16/9;width:100%;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#060D1C"><iframe id="rkTv" title="Ranking ao vivo" style="width:100%;height:100%;border:0;display:block"></iframe></div>
     <div id="rkFull">
@@ -219,7 +219,7 @@
       <div class="panel"><div class="panel-head"><h2>Fechadores</h2><span class="note">vendas fechadas no mês</span></div><div class="list" id="rkFech"></div></div>
     </div>
     <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Evolução por equipe</h2><span class="note">cotas por mês</span></div><div class="tbl-wrap" style="border:0"><table id="rkEvol"></table></div></div>
-    <div class="panel-head" style="margin:8px 0"><h2>Todos os vendedores</h2><span class="note">2ª paga e estornos contam só as vendas do mês cuja 2ª parcela já venceu</span></div>
+    <div class="panel-head" style="margin:8px 0"><h2>Todos os vendedores</h2><span class="note">Média e tendência comparam com as 3 quinzenas anteriores. 2ª paga e estornos contam só as vendas cuja 2ª parcela já venceu</span></div>
     <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Vendedor</th><th>Equipe</th><th class="r">Cotas</th><th class="r">Crédito</th><th class="r">Ticket médio</th><th class="r">Média 3 meses</th><th class="r">Tendência</th><th class="r">2ª paga</th><th class="r">Estornos</th><th class="r">Canceladas</th></tr></thead><tbody id="tbRank"></tbody></table></div>
     </div>
   </section>

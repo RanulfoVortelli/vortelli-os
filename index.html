@@ -49,6 +49,7 @@
     <button data-view="carteira">Minha carteira</button>
     <button data-view="cotas">Cotas</button>
     <button data-view="comissoes" data-fin hidden>Comissões</button>
+    <button data-view="debitos" data-fin hidden>Débitos</button>
     <button data-view="conferencia" data-gestor>Conferência Disal</button>
     <button data-view="ranking">Ranking</button>
     <button data-view="trafego">Tráfego pago</button>
@@ -137,6 +138,7 @@
       <div class="panel"><div class="panel-head"><h2>Risco de estorno</h2><span class="note">seus clientes com a 2ª parcela vencendo ou vencida sem baixa</span></div><div class="list" id="mcRisco"></div></div>
       <div class="panel"><div class="panel-head"><h2>Aguardando a Disal</h2><span class="note">vendas cadastradas que ainda não saíram pagas</span></div><div class="list" id="mcAguard"></div></div>
     </div>
+    <div class="panel" style="margin-top:16px"><div class="panel-head"><h2>Débitos</h2><span class="note">adiantamentos, empréstimos e saldos descontados na comissão</span></div><div class="list" id="mcDeb"></div></div>
   </section>
 
   <section data-page="carteira" hidden>
@@ -188,7 +190,7 @@
     <div id="trPrev"></div>
     <div class="kpis" id="kpisTr" style="margin-bottom:16px"></div>
     <div class="tbl-wrap"><table><thead><tr><th>Consultor</th><th>Equipe</th><th class="r">Gasto</th><th class="r">Leads</th><th class="r">Custo por lead</th><th class="r">Vendas</th><th class="r">Tráfego por venda</th><th class="r">Desconto</th></tr></thead><tbody id="tbTr"></tbody></table></div>
-    <form class="panel" id="formDesc" data-gestor style="margin-top:16px">
+    <form class="panel" id="formDesc" hidden style="margin-top:16px">
       <div class="panel-head"><h2>Descontos na comissão</h2><span class="note">Débitos da equipe (empréstimo, veículo comprado na loja). Sai da comissão na sexta escolhida.</span></div>
       <div class="formgrid">
         <label for="dPessoa">Pessoa<select id="dPessoa"></select></label>
@@ -200,6 +202,17 @@
       <div><button class="btn gold" type="submit">Lançar desconto</button></div>
       <div class="list" id="dLista" style="margin-top:12px"></div>
     </form>
+  </section>
+
+  <section data-page="debitos" hidden>
+    <div class="top" style="margin-bottom:16px">
+      <div><span class="eyebrow">Conta do colaborador</span><h1>Débitos da equipe</h1><p class="sub">Adiantamentos, empréstimos, compras na loja, danos ou saldos antigos. Lance o débito, escolha como descontar e o sistema tira da comissão de sexta sozinho. Cada um vê os próprios débitos na Minha comissão.</p></div>
+      <div class="toolbar" style="align-items:flex-end"><button class="btn gold" type="button" data-deb="novo">+ Novo débito</button></div>
+    </div>
+    <div class="kpis" id="kpisDeb" style="margin-bottom:16px"></div>
+    <div class="toolbar" style="margin-bottom:12px;align-items:flex-end"><label for="dbBusca">Buscar<input id="dbBusca" placeholder="Pessoa ou descrição"></label><label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="dbTodos" style="width:auto"> Mostrar quitados e cancelados</label></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Pessoa</th><th>Débito</th><th>Como desconta</th><th class="r">Total</th><th class="r">Pago</th><th class="r">Falta</th><th>Próximo desconto</th><th>Situação</th><th></th></tr></thead><tbody id="tbDeb"></tbody></table></div>
+    <p class="note" style="margin-top:8px">Saldo negativo: quando a sexta de alguém fecha no negativo (estorno ou desconto maior que a comissão), ele não recebe e o valor passa sozinho para a sexta seguinte, a partir de 23/10/2026.</p>
   </section>
 
   <section data-page="financeiro" hidden>
@@ -308,6 +321,35 @@
   <div id="cfLeitura" style="margin-top:10px"></div>
   <p id="cfErro" class="neg" style="min-height:18px;margin:8px 0 0;font-size:13px"></p>
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="btn ghost" id="cfCancelar" type="button">Voltar</button><button class="btn" id="cfSalvar" type="button" disabled>Confirmar cancelamento</button></div>
+</dialog>
+<dialog id="dlgDeb" class="dlg" style="max-width:520px">
+  <h2 style="margin:0 0 12px">Novo débito</h2>
+  <label for="dbPessoa">Quem<select id="dbPessoa"></select></label>
+  <label for="dbDesc" style="margin-top:10px">O que é<input id="dbDesc" maxlength="120" placeholder="Escreva com suas palavras"></label>
+  <div class="acts" style="margin-top:6px;flex-wrap:wrap">
+    <button type="button" class="btn ghost sm" data-deb="sugestao">Adiantamento de comissão</button><button type="button" class="btn ghost sm" data-deb="sugestao">Empréstimo</button><button type="button" class="btn ghost sm" data-deb="sugestao">Compra na loja</button><button type="button" class="btn ghost sm" data-deb="sugestao">Saldo devedor anterior</button><button type="button" class="btn ghost sm" data-deb="sugestao">Dano ou avaria</button>
+  </div>
+  <label for="dbValor" style="margin-top:10px">Valor total (R$)<input id="dbValor" type="number" min="0.01" step="0.01" placeholder="0,00"></label>
+  <fieldset style="border:1px solid var(--line);border-radius:8px;margin:10px 0 0;padding:8px 12px">
+    <legend style="font-size:13px;padding:0 4px">Como descontar</legend>
+    <label style="flex-direction:row;align-items:center;gap:8px"><input type="radio" name="dbForma" value="unico" style="width:auto"> Tudo de uma vez</label>
+    <label style="flex-direction:row;align-items:center;gap:8px"><input type="radio" name="dbForma" value="parcelas" style="width:auto"> Parcelado em sextas iguais</label>
+    <label style="flex-direction:row;align-items:center;gap:8px"><input type="radio" name="dbForma" value="fixo" style="width:auto"> Valor fixo por sexta até quitar</label>
+    <label style="flex-direction:row;align-items:center;gap:8px"><input type="radio" name="dbForma" value="abater" style="width:auto"> Abater de toda comissão até quitar</label>
+    <label style="flex-direction:row;align-items:center;gap:8px"><input type="radio" name="dbForma" value="direto" style="width:auto"> Paga direto à loja, com vencimentos (não sai da comissão)</label>
+  </fieldset>
+  <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+    <label for="dbParc" id="dbParcL" style="flex:1">Em quantas sextas<input id="dbParc" type="number" min="1" max="104" value="2"></label>
+    <label for="dbPer" id="dbPerL" style="flex:1" hidden>Vence a cada<select id="dbPer"><option value="mensal">Mês</option><option value="quinzenal">15 dias</option><option value="semanal">Semana</option></select></label>
+    <label for="dbVenc" id="dbVencL" style="flex:1" hidden>1º vencimento<input id="dbVenc" type="date"></label>
+    <label for="dbFixo" id="dbFixoL" style="flex:1" hidden>Valor por sexta (R$)<input id="dbFixo" type="number" min="0.01" step="0.01" placeholder="0,00"></label>
+    <label for="dbInicio" id="dbInicioL" style="flex:1">Começa na sexta<select id="dbInicio"></select></label>
+  </div>
+  <label for="dbJaPago" style="margin-top:10px">Já pago antes de lançar (R$, opcional)<input id="dbJaPago" type="number" min="0" step="0.01" placeholder="0,00 — para débitos antigos"></label>
+  <label for="dbObs" style="margin-top:10px">Observação (opcional)<input id="dbObs" maxlength="300" placeholder="Ex.: combinado com o Ranulfo em 17/10"></label>
+  <p id="dbResumo" class="note" style="margin:12px 0 0;padding:10px;border-radius:8px;background:var(--surface-2,rgba(0,0,0,.04))"></p>
+  <p id="dbErro" class="neg" style="min-height:18px;margin:8px 0 0;font-size:13px"></p>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="btn ghost" id="dbVoltar" type="button">Voltar</button><button class="btn" id="dbSalvar" type="button">Lançar débito</button></div>
 </dialog>
 </body>
 </html>

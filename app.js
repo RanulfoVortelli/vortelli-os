@@ -125,6 +125,7 @@ async function carregar(user) {
     LANC = (lc.data || []).map(l => ({ ...l, data: parseD(l.data), valor: Number(l.valor) }));
     await carregarTrafego();
     await carregarCanc();
+    await carregarDebitos();
     $('login').hidden = true; $('app').hidden = false;
     $('quem').textContent = `${ME.nome} · ${funcaoNome(ME)}`;
     document.querySelectorAll('[data-gestor]').forEach(b => b.hidden = !GESTOR);
@@ -268,7 +269,7 @@ function bonusGerenteGeral() {
     return { pessoa: gg.id, papel: 'Gerente geral', data: addDays(fim, 7), valor: n * r('gg_por_cota'), tipo: 'com', cota: { id: 'gg' + ym } };
   }).filter(e => ativoEm(e.pessoa, e.data));
 }
-const todosEventosEquipe = () => COTAS.flatMap(eventosEquipe).concat(bonusGerenteGeral(), eventosDescontos());
+const todosEventosEquipe = () => aplicarConta(COTAS.flatMap(eventosEquipe).concat(bonusGerenteGeral(), eventosDescontos()));
 function mesResumo(ym) {
   const vendas = COTAS.filter(c => valida(c) && noMes(c.venda, ym));
   let disal = 0, entrada = 0, equipe = 0;
@@ -323,7 +324,8 @@ function renderPainel() {
   $('rankEquipes').innerHTML = porEq.map((e, i) => `<div class="row"><div class="l"><span style="font-family:var(--f-num)">${i + 1}º</span>${esc(e.nome)} · ${esc(e.ger)}</div><b>${e.n} cotas · ${brl(e.cred)}</b></div>`).join('');
   const atras = al.filter(c => stView(c, 2) === 'atrasado').length;
   const prox = sextaApos(addDays(TODAY, -1));
-  const aPagar = todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +prox).reduce((s, e) => s + e.valor, 0);
+  const porPes = {}; todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +prox).forEach(e => { porPes[e.pessoa] = (porPes[e.pessoa] || 0) + e.valor; });
+  const aPagar = Object.values(porPes).reduce((s, v) => s + Math.max(0, v), 0);
   const semCarteira = COTAS.filter(c => valida(c) && !c.historico && !c.adm_id && c.p[5] !== 'pago').length;
   const aguard = COTAS.filter(c => valida(c) && !c.confirmada).length;
   const pend = Object.values(R).filter(x => x.pendente).length;
@@ -366,8 +368,9 @@ function renderComissoes() {
   const tot = x => x.com + x.est + x.desc;
   const lista = Object.values(map).sort((a, b) => tot(b) - tot(a));
   const tc = lista.reduce((s, x) => s + x.com, 0), te = lista.reduce((s, x) => s + x.est, 0), td = lista.reduce((s, x) => s + x.desc, 0);
-  $('kpisCom').innerHTML = kpi('Comissões', brl(tc)) + kpi('Estornos', `<span class="neg">${brl(te)}</span>`) + kpi('Descontos', `<span class="neg">${brl(td)}</span>`, 'Tráfego pago e débitos') + kpi('Total a pagar', brl(tc + te + td)) + kpi('Pessoas', lista.length);
-  $('tbCom').innerHTML = lista.length ? lista.map(x => { const p = pessoaPorId(x.id) || {}; return `<tr><td>${esc(p.nome)}</td><td>${funcaoNome(p)}</td><td>${esc(equipeNome(p.equipe_id))}</td><td class="r n">${x.cotas.size}</td><td class="r n">${brl(x.com, 2)}</td><td class="r n ${x.est ? 'neg' : ''}">${x.est ? brl(x.est, 2) : '—'}</td><td class="r n ${x.desc ? 'neg' : ''}">${x.desc ? brl(x.desc, 2) : '—'}</td><td class="r n ${tot(x) < 0 ? 'neg' : ''}"><strong>${brl(tot(x), 2)}</strong></td></tr>`; }).join('') +
+  const pagar = lista.reduce((s, x) => s + Math.max(0, tot(x)), 0), passa = lista.reduce((s, x) => s + Math.min(0, tot(x)), 0);
+  $('kpisCom').innerHTML = kpi('Comissões', brl(tc)) + kpi('Estornos', `<span class="neg">${brl(te)}</span>`) + kpi('Descontos', `<span class="neg">${brl(td)}</span>`, 'Tráfego, débitos e saldo anterior') + kpi('Total a pagar', brl(pagar), passa ? `${lista.filter(x => tot(x) < 0).length} com saldo negativo: ${brl(passa)} passa para a próxima sexta` : 'Ninguém negativo') + kpi('Pessoas', lista.length);
+  $('tbCom').innerHTML = lista.length ? lista.map(x => { const p = pessoaPorId(x.id) || {}; return `<tr><td>${esc(p.nome)}</td><td>${funcaoNome(p)}</td><td>${esc(equipeNome(p.equipe_id))}</td><td class="r n">${x.cotas.size}</td><td class="r n">${brl(x.com, 2)}</td><td class="r n ${x.est ? 'neg' : ''}">${x.est ? brl(x.est, 2) : '—'}</td><td class="r n ${x.desc ? 'neg' : ''}">${x.desc ? brl(x.desc, 2) : '—'}</td><td class="r n ${tot(x) < 0 ? 'neg' : ''}"><strong>${brl(tot(x), 2)}</strong>${tot(x) < 0 ? '<br><span class="note">não recebe; passa para a próxima sexta</span>' : ''}</td></tr>`; }).join('') +
     `<tr class="total"><td colspan="4">Total</td><td class="r n">${brl(tc, 2)}</td><td class="r n neg">${brl(te, 2)}</td><td class="r n neg">${brl(td, 2)}</td><td class="r n">${brl(tc + te + td, 2)}</td></tr>`
     : `<tr><td colspan="8" class="empty">Nada a pagar nesta sexta.</td></tr>`;
 }
@@ -511,7 +514,7 @@ function renderRanking() {
   }).join('');
 }
 /* ---------------- Minha comissão (extrato individual) ---------------- */
-const tipoLanc = e => e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : 'Venda');
+const tipoLanc = e => e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : 'Venda');
 function renderMinha() {
   if (!ME || !$('mcSexta').value) return;
   if (veComissoes() && !$('mcPessoa').value) return;
@@ -528,7 +531,7 @@ function renderMinha() {
   const aguard = COTAS.filter(c => valida(c) && !c.confirmada).map(c => ({ c, v: minhasPartes(c) })).filter(x => x.v > 0);
   const risco = alertasLista().map(c => ({ c, v: minhasPartes(c) * r('estorno_equipe') / 100 })).filter(x => x.v > 0);
   $('kpisMc').innerHTML =
-    kpi(`A receber em ${fdate(sexta)}`, brl(com + est + dsc, 2), `${daSexta.filter(e => e.tipo === 'com').length} lançamentos`) +
+    kpi(`A receber em ${fdate(sexta)}`, brl(Math.max(0, com + est + dsc), 2), com + est + dsc < 0 ? `<b class="neg">Saldo de ${brl(com + est + dsc, 2)} passa para a próxima sexta</b>` : `${daSexta.filter(e => e.tipo === 'com').length} lançamentos`) +
     kpi('Comissões', brl(com, 2), [est ? `Estornos ${brl(est, 2)}` : 'Sem estornos', dsc ? `Descontos ${brl(dsc, 2)}` : ''].filter(Boolean).join(' · ')) +
     kpi(`Total de ${MESES[ymS % 12]}`, brl(soma(noMesPag), 2), 'Somando todas as sextas do mês') +
     kpi('Aguardando a Disal', brl(aguard.reduce((s, x) => s + x.v, 0), 2), `${aguard.length} ${aguard.length === 1 ? 'venda' : 'vendas'} ainda sem confirmação`);
@@ -538,6 +541,7 @@ function renderMinha() {
   }).join('') + `<tr class="total"><td colspan="6">Total da sexta</td><td class="r n">${brl(com + est + dsc, 2)}</td></tr>`
     : `<tr><td colspan="7" class="empty">Nada a receber nesta sexta.</td></tr>`;
   $('mcRisco').innerHTML = risco.length ? risco.map(({ c, v }) => `<div class="row"><div class="l">${esc(c.cliente)}<span>2ª vence ${fdate(venc(c, 2))} · ${esc(c.telefone || 'sem telefone')}${stView(c, 2) === 'atrasado' ? ' · <b class="neg">vencida</b>' : ''}</span></div><b class="neg">−${brl(v, 2)}</b></div>`).join('') : '<p class="note">Nenhum cliente seu em risco agora.</p>';
+  if ($('mcDeb')) $('mcDeb').innerHTML = meusDebitosHtml(alvo.id);
   $('mcAguard').innerHTML = aguard.length ? aguard.map(({ c, v }) => `<div class="row"><div class="l">${esc(c.cliente)}<span>venda ${fdate(c.venda)} · ${brl(c.credito)}</span></div><b>${brl(v, 2)}</b></div>`).join('') : '<p class="note">Nenhuma venda sua aguardando.</p>';
 }
 function initFiltros() {
@@ -558,7 +562,7 @@ function initFiltros() {
   $('fAdm').innerHTML = '<option value="">Sem carteira</option>' + opt(ativos.filter(p => ['administrativo', 'gerente_adm'].includes(p.funcao)));
   $('fData').value = iso(TODAY); $('lData').value = iso(TODAY);
 }
-function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); renderUsuarios(); renderRanking(); renderMinha(); renderTrafego(); renderCarteira(); }
+function renderAll() { renderPainel(); renderCotas(); renderComissoes(); renderAlertas(); renderFin(); renderEquipes(); renderManual(); renderUsuarios(); renderRanking(); renderMinha(); renderTrafego(); renderCarteira(); renderDebitos(); }
 function go(view) {
   if (view === 'conferencia') abrirConferencia();
   if (view === 'ranking' && !GESTOR && !$('rkTv').src) $('rkTv').src = 'tv.html?embed=1';
@@ -1664,5 +1668,221 @@ function resumoMotivos(lista) {
   return lista.length ? `<div class="grid2" style="margin-bottom:16px"><div class="panel"><div class="panel-head"><h2>Motivos</h2><span class="note">${lista.length} cancelamento${lista.length > 1 ? 's' : ''}${lista.some(c => c.canc.doc && c.canc.doc !== 'ok') ? ` · <b class="neg">${lista.filter(c => c.canc.doc && c.canc.doc !== 'ok').length} documento(s) para revisar</b>` : ''}</span></div><div class="list">${linhas(por)}</div></div><div class="panel"><div class="panel-head"><h2>Por vendedor</h2></div><div class="list">${linhas(porV)}</div></div></div>` : '';
 }
 /* <<< CANCELAMENTO <<< */
+/* >>> DEBITOS >>> */
+// Débitos da equipe: a gerente adm e o CEO lançam qualquer débito (descrição livre) e escolhem como descontar na sexta.
+// O saldo negativo de uma sexta passa sozinho para a seguinte a partir de CARRY_DESDE.
+let DEB = [], DPAG = [], CONTA = {};
+const CARRY_DESDE = new Date(2026, 9, 23);
+const podeDeb = () => !!(ME && (GESTOR || ME.funcao === 'gerente_adm'));
+const FORMAS_DEB = { unico: 'Tudo de uma vez', parcelas: 'Parcelado', fixo: 'Valor fixo por sexta', abater: 'Abater da comissão até quitar', direto: 'Paga direto à loja, com vencimentos' };
+const PERIODOS = { semanal: 'semanal', quinzenal: 'quinzenal', mensal: 'mensal' };
+const r2 = v => Math.round(v * 100) / 100;
+async function carregarDebitos() {
+  try {
+    const [d, p] = await Promise.all([sb.from('debitos').select('*').order('criado_em'), sb.from('debito_pagamentos').select('*').order('data')]);
+    if (d.error) throw d.error;
+    DEB = (d.data || []).map(x => ({ ...x, valor_total: Number(x.valor_total), valor_sexta: x.valor_sexta == null ? null : Number(x.valor_sexta), ini: parseD(x.inicio), venc1: x.primeiro_venc ? parseD(x.primeiro_venc) : null }));
+    DPAG = (p.data || []).map(x => ({ ...x, valor: Number(x.valor), dt: parseD(x.data) }));
+  } catch (e) { console.warn('Débitos ainda não disponíveis:', e.message || e); DEB = []; DPAG = []; }
+}
+// Parcela k (0-based) de um débito parcelado: divide em partes iguais, a última fecha os centavos
+const parcelaDeb = (d, k) => { const p = Math.floor(d.valor_total / d.parcelas * 100) / 100; return k === d.parcelas - 1 ? r2(d.valor_total - p * (d.parcelas - 1)) : p; };
+// Pagamento direto: parcelas com vencimento (semanal, quinzenal ou mensal); os pagamentos registrados quitam na ordem
+function vencDireto(d, k) {
+  if (d.periodicidade === 'mensal') { const x = new Date(d.venc1.getFullYear(), d.venc1.getMonth() + k, 1), ult = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate(); x.setDate(Math.min(d.venc1.getDate(), ult)); return x; }
+  return addDays(d.venc1, k * (d.periodicidade === 'quinzenal' ? 14 : 7));
+}
+function agendaDireto(d) {
+  let pago = DPAG.filter(p => p.debito_id === d.id).reduce((s, p) => s + p.valor, 0);
+  return Array.from({ length: d.parcelas || 1 }, (_, k) => { const v = parcelaDeb(d, k), quitada = pago >= v - 0.005; pago = r2(pago - v); return { k, venc: vencDireto(d, k), v, quitada, parcial: !quitada && pago > -v ? r2(v + pago) : 0 }; });
+}
+const vencidasDireto = d => d.forma === 'direto' && d.status === 'ativo' ? agendaDireto(d).filter(x => !x.quitada && x.venc < TODAY) : [];
+function aplicarConta(base) {
+  const ativos = DEB.filter(d => d.status === 'ativo' && d.forma !== 'direto');
+  const inicio = new Date(Math.min(+CARRY_DESDE, ...ativos.map(d => +d.ini)));
+  const porP = {};
+  base.forEach(e => { const s = +sextaPagamento(e.data); if (s < +inicio) return; const m = porP[e.pessoa] ||= {}; m[s] = (m[s] || 0) + e.valor; });
+  ativos.forEach(d => { porP[d.pessoa_id] ||= {}; });
+  const agora = +sextaApos(addDays(TODAY, -7));
+  const extra = []; CONTA = {};
+  DEB.forEach(d => { CONTA[d.id] = { descontado: 0, previsto: 0, fora: DPAG.filter(p => p.debito_id === d.id).reduce((s, p) => s + p.valor, 0), linhas: [], prox: null, fim: null }; });
+  Object.entries(porP).forEach(([pid, semanas]) => {
+    const meus = ativos.filter(d => d.pessoa_id === pid).sort((a, b) => a.ini - b.ini || a.id - b.id);
+    const ultimaBase = Math.max(agora, ...Object.keys(semanas).map(Number));
+    const ultimaParc = Math.max(0, ...meus.filter(d => d.forma === 'parcelas').map(d => +addDays(d.ini, 7 * (d.parcelas - 1))));
+    const fim = Math.max(ultimaBase, ultimaParc, ...meus.filter(d => d.forma === 'unico').map(d => +d.ini)) + 7 * 864e5 * (meus.some(d => d.forma === 'fixo') ? 104 : 1);
+    const rest = {}; meus.forEach(d => { rest[d.id] = d.valor_total; });
+    let carry = 0;
+    for (let s = +inicio; s <= fim; s = +addDays(new Date(s), 7)) {
+      const S = new Date(s), seg = addDays(S, -11);
+      if (!ativoEm(pid, seg)) break;
+      let net = (semanas[s] || 0) + carry;
+      if (carry < 0) extra.push({ pessoa: pid, papel: 'Saldo anterior', data: seg, valor: r2(carry), tipo: 'desc', cota: { id: `sa${pid}${s}`, cliente: `Saldo negativo da sexta ${fdate(addDays(S, -7))}` } });
+      const desconta = (d, v, txt) => {
+        v = r2(Math.min(v, rest[d.id])); if (!(v > 0)) return;
+        rest[d.id] = r2(rest[d.id] - v); net -= v;
+        extra.push({ pessoa: pid, papel: 'Débito', data: seg, valor: -v, tipo: 'desc', cota: { id: `db${d.id}-${s}`, cliente: txt } });
+        const C = CONTA[d.id]; C.linhas.push({ s: S, v }); if (s <= agora) C.descontado += v; else { C.previsto += v; if (!C.prox) C.prox = { s: S, v }; }
+        if (rest[d.id] <= 0) C.fim = S;
+      };
+      // pagamentos por fora até esta sexta
+      meus.forEach(d => { DPAG.filter(p => p.debito_id === d.id && +sextaPagamento(p.dt) === s).forEach(p => { rest[d.id] = r2(Math.max(0, rest[d.id] - p.valor)); if (rest[d.id] <= 0 && !CONTA[d.id].fim) CONTA[d.id].fim = S; }); });
+      meus.forEach(d => {
+        if (s < +d.ini || rest[d.id] <= 0) return;
+        const k = Math.round((s - +d.ini) / (7 * 864e5));
+        if (d.forma === 'unico' && k === 0) desconta(d, d.valor_total, d.descricao);
+        if (d.forma === 'parcelas' && k < d.parcelas) desconta(d, parcelaDeb(d, k), `${d.descricao} (${k + 1}/${d.parcelas})`);
+        if (d.forma === 'fixo') desconta(d, d.valor_sexta, d.descricao);
+      });
+      meus.forEach(d => { if (d.forma === 'abater' && s >= +d.ini && rest[d.id] > 0 && net > 0) desconta(d, net, `${d.descricao} (abatimento)`); });
+      carry = s >= +CARRY_DESDE ? Math.min(0, r2(net)) : 0;
+      if (s > ultimaBase && meus.every(d => rest[d.id] <= 0 || d.forma === 'abater' || (d.forma === 'parcelas' && s >= +addDays(d.ini, 7 * (d.parcelas - 1))))) {
+        if (carry < 0) extra.push({ pessoa: pid, papel: 'Saldo anterior', data: addDays(seg, 7), valor: r2(carry), tipo: 'desc', cota: { id: `sa${pid}${s + 7 * 864e5}`, cliente: `Saldo negativo da sexta ${fdate(S)}` } });
+        break;
+      }
+    }
+  });
+  DEB.filter(d => d.forma === 'direto').forEach(d => { const a = agendaDireto(d), n = a.find(x => !x.quitada); CONTA[d.id].linhas = a.map(x => ({ s: x.venc, v: x.v, direto: true, quitada: x.quitada })); if (n && d.status === 'ativo') CONTA[d.id].prox = { s: n.venc, v: r2(n.v - n.parcial), direto: true }; });
+  return base.concat(extra);
+}
+const restanteDeb = d => d.status !== 'ativo' ? 0 : r2(Math.max(0, d.valor_total - CONTA[d.id].fora - CONTA[d.id].descontado));
+function situacaoDeb(d) {
+  if (d.status === 'cancelado') return '<span class="chip c-canc">Cancelado</span>';
+  const p = pessoaPorId(d.pessoa_id) || {}, falta = restanteDeb(d);
+  if (falta <= 0) return '<span class="chip c-pago">Quitado</span>';
+  const venc = vencidasDireto(d); if (venc.length) return `<span class="chip c-atrasado">${venc.length} ${venc.length === 1 ? 'parcela vencida' : 'parcelas vencidas'}</span>`;
+  if (p.data_saida || p.ativo === false) return '<span class="chip c-atrasado">Saiu devendo</span>';
+  return '<span class="chip c-aberto">Em aberto</span>';
+}
+function formaTxt(d) {
+  if (d.forma === 'direto') return `${d.parcelas}× de ${brl(parcelaDeb(d, 0), 2)} · ${PERIODOS[d.periodicidade] || ''} · direto à loja`;
+  return d.forma === 'parcelas' ? `${d.parcelas}× de ${brl(parcelaDeb(d, 0), 2)}` : d.forma === 'fixo' ? `${brl(d.valor_sexta, 2)} por sexta` : d.forma === 'abater' ? 'Abate da comissão' : 'Uma vez';
+}
+function renderDebitos() {
+  if (!$('tbDeb') || !podeDeb()) return;
+  todosEventosEquipe();   // atualiza CONTA
+  const q = tira($('dbBusca').value), todos = $('dbTodos').checked;
+  const lista = DEB.filter(d => (todos || (d.status === 'ativo' && restanteDeb(d) > 0)) && (!q || tira(`${(pessoaPorId(d.pessoa_id) || {}).nome} ${d.descricao}`).includes(q)))
+    .sort((a, b) => (restanteDeb(b) > 0) - (restanteDeb(a) > 0) || ((pessoaPorId(a.pessoa_id) || {}).nome || '').localeCompare((pessoaPorId(b.pessoa_id) || {}).nome || ''));
+  const abertos = DEB.filter(d => restanteDeb(d) > 0), prox = sextaApos(TODAY);
+  const naProx = abertos.reduce((s, d) => s + (CONTA[d.id].prox && !CONTA[d.id].prox.direto && +CONTA[d.id].prox.s === +prox ? CONTA[d.id].prox.v : 0), 0);
+  const sairam = abertos.filter(d => { const p = pessoaPorId(d.pessoa_id) || {}; return p.data_saida || p.ativo === false; });
+  $('kpisDeb').innerHTML = kpi('Em aberto', brl(abertos.reduce((s, d) => s + restanteDeb(d), 0), 2), `${abertos.length} ${abertos.length === 1 ? 'débito' : 'débitos'}`) +
+    kpi('Pessoas devendo', new Set(abertos.map(d => d.pessoa_id)).size, (() => { const n = DEB.reduce((s, d) => s + vencidasDireto(d).length, 0); return n ? `<b class="neg">${n} ${n === 1 ? 'parcela direta vencida' : 'parcelas diretas vencidas'}</b>` : 'Nenhuma parcela direta vencida'; })()) +
+    kpi(`Desconta em ${fdate(prox)}`, brl(naProx, 2), 'Da comissão de sexta') +
+    kpi('Saiu devendo', `<span class="${sairam.length ? 'neg' : ''}">${brl(sairam.reduce((s, d) => s + restanteDeb(d), 0), 2)}</span>`, sairam.length ? 'Não volta pela comissão' : 'Ninguém');
+  $('tbDeb').innerHTML = lista.length ? lista.map(d => {
+    const C = CONTA[d.id], p = pessoaPorId(d.pessoa_id) || {}, falta = restanteDeb(d), pago = r2(C.descontado + C.fora);
+    return `<tr><td>${esc(p.nome || '—')}</td><td>${esc(d.descricao)}${d.obs ? `<br><span class="note">${esc(d.obs)}</span>` : ''}</td><td>${formaTxt(d)}<br><span class="note">${d.forma === 'direto' ? '1º vencimento' : 'desde'} ${fdate(d.ini)}</span></td><td class="r n">${brl(d.valor_total, 2)}</td><td class="r n">${brl(pago, 2)}</td><td class="r n ${falta > 0 ? 'neg' : ''}"><strong>${brl(falta, 2)}</strong></td>
+      <td class="n">${C.prox && d.status === 'ativo' ? `${C.prox.direto ? 'vence ' : ''}${fdate(C.prox.s)} · ${brl(C.prox.v, 2)}` : '—'}</td><td>${situacaoDeb(d)}</td>
+      <td><div class="acts"><button class="btn ghost sm" data-deb="ver:${d.id}">Detalhes</button>${d.status === 'ativo' && falta > 0 ? `<button class="btn ghost sm" data-deb="pag:${d.id}">Registrar pagamento</button><button class="btn ghost sm" data-deb="canc:${d.id}">Cancelar</button>` : ''}</div></td></tr>
+      <tr data-debdet="${d.id}" hidden><td colspan="9">${detalheDeb(d)}</td></tr>`;
+  }).join('') : `<tr><td colspan="9" class="empty">${todos ? 'Nenhum débito lançado.' : 'Ninguém devendo agora.'}</td></tr>`;
+}
+function detalheDeb(d) {
+  const C = CONTA[d.id], agora = +sextaApos(addDays(TODAY, -7));
+  const linhas = C.linhas.map(x => x.direto ? { t: x.s, txt: `Vencimento ${fdate(x.s)}`, v: x.v, ok: x.quitada, st: x.quitada ? 'pago' : x.s < TODAY ? '<b class="neg">vencida</b>' : 'a vencer' } : { t: x.s, txt: `Sexta ${fdate(x.s)}`, v: x.v, ok: +x.s <= agora })
+    .concat(DPAG.filter(p => p.debito_id === d.id).map(p => ({ t: p.dt, txt: `Pagamento em ${fdate(p.dt)}${p.obs ? ' · ' + esc(p.obs) : ''}`, v: p.valor, ok: true, pid: p.id })))
+    .sort((a, b) => a.t - b.t);
+  const quem = d.criado_por ? ` · lançado por ${esc(nomeP(d.criado_por))}` : '';
+  return `<div class="list" style="max-width:640px">${linhas.map(x => `<div class="row"><div class="l">${x.txt}<span>${x.st || (x.pid ? 'recebido' : x.ok ? 'descontado' : 'previsto')}</span></div><b>${brl(x.v, 2)}</b>${x.pid && podeDeb() ? ` <button class="btn ghost sm" data-deb="delpag:${x.pid}">Excluir</button>` : ''}</div>`).join('') || '<p class="note">Nada descontado ainda.</p>'}</div>
+    <p class="note" style="margin-top:6px">${FORMAS_DEB[d.forma]}${quem}${d.status === 'cancelado' ? ` · cancelado: ${esc(d.motivo_cancel || '')}` : ''}${d.forma === 'abater' ? ' · desconta o que houver de comissão em cada sexta' : ''}</p>`;
+}
+// Formulário de novo débito
+function abrirNovoDeb() {
+  $('dbPessoa').innerHTML = '<option value="">Escolha…</option>' + PESSOAS.filter(p => p.ativo && !['ceo', 'tv'].includes(p.funcao)).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => `<option value="${p.id}">${esc(p.nome)}</option>`).join('');
+  const s0 = sextaApos(TODAY);
+  $('dbInicio').innerHTML = Array.from({ length: 12 }, (_, i) => addDays(s0, 7 * i)).map((d, i) => `<option value="${iso(d)}">${d.toLocaleDateString('pt-BR')}${i === 0 ? ' (próxima)' : ''}</option>`).join('');
+  ['dbDesc', 'dbValor', 'dbObs', 'dbJaPago'].forEach(id => $(id).value = ''); $('dbParc').value = 2; $('dbFixo').value = ''; $('dbVenc').value = iso(addDays(TODAY, 30)); $('dbPer').value = 'mensal';
+  document.querySelector('input[name="dbForma"][value="parcelas"]').checked = true;
+  $('dbErro').textContent = ''; resumoDeb(); $('dlgDeb').showModal();
+}
+function lerFormDeb() {
+  const forma = (document.querySelector('input[name="dbForma"]:checked') || {}).value;
+  return { pessoa_id: $('dbPessoa').value, descricao: $('dbDesc').value.trim(), valor_total: r2(+$('dbValor').value), forma,
+    parcelas: forma === 'parcelas' || forma === 'direto' ? Math.max(1, Math.min(104, Math.round(+$('dbParc').value || 0))) : null,
+    valor_sexta: forma === 'fixo' ? r2(+$('dbFixo').value) : null, inicio: forma === 'direto' ? $('dbVenc').value : $('dbInicio').value, obs: $('dbObs').value.trim() || null,
+    periodicidade: forma === 'direto' ? $('dbPer').value : null, primeiro_venc: forma === 'direto' ? $('dbVenc').value || null : null };
+}
+function resumoDeb() {
+  const f = lerFormDeb();
+  $('dbParcL').hidden = !['parcelas', 'direto'].includes(f.forma); $('dbFixoL').hidden = f.forma !== 'fixo';
+  $('dbInicioL').hidden = f.forma === 'direto'; $('dbVencL').hidden = $('dbPerL').hidden = f.forma !== 'direto';
+  $('dbParcL').firstChild.textContent = f.forma === 'direto' ? 'Quantas parcelas' : 'Em quantas sextas';
+  const ini = f.inicio ? parseD(f.inicio) : null, nome = (pessoaPorId(f.pessoa_id) || {}).nome || 'o colaborador';
+  let t = '';
+  if (f.valor_total > 0 && ini) {
+    if (f.forma === 'unico') t = `Desconta ${brl(f.valor_total, 2)} de ${esc(nome)} na sexta ${fdate(ini)}.`;
+    if (f.forma === 'parcelas' && f.parcelas) { const d = { valor_total: f.valor_total, parcelas: f.parcelas }; t = `${f.parcelas}× de ${brl(parcelaDeb(d, 0), 2)}${parcelaDeb(d, f.parcelas - 1) !== parcelaDeb(d, 0) ? ` (a última de ${brl(parcelaDeb(d, f.parcelas - 1), 2)})` : ''}, de ${fdate(ini)} a ${fdate(addDays(ini, 7 * (f.parcelas - 1)))}.`; }
+    if (f.forma === 'fixo' && f.valor_sexta > 0) { const n = Math.ceil(f.valor_total / f.valor_sexta - 1e-9); t = `${brl(f.valor_sexta, 2)} por sexta a partir de ${fdate(ini)}: ${n} ${n === 1 ? 'sexta' : 'sextas'}, quitado em ${fdate(addDays(ini, 7 * (n - 1)))}.`; }
+    if (f.forma === 'direto' && f.parcelas && f.primeiro_venc) { const d = { valor_total: f.valor_total, parcelas: f.parcelas, periodicidade: f.periodicidade, venc1: parseD(f.primeiro_venc) }; const vs = Array.from({ length: Math.min(f.parcelas, 4) }, (_, k) => fdate(vencDireto(d, k))).join(', '); t = `${f.parcelas}× de ${brl(parcelaDeb(d, 0), 2)}, ${PERIODOS[f.periodicidade]}, vencendo ${vs}${f.parcelas > 4 ? '…' : ''}. Não sai da comissão: cada pagamento é registrado no sistema, e parcela vencida fica em vermelho.`; }
+    if (f.forma === 'abater') t = `A partir de ${fdate(ini)}, toda comissão de ${esc(nome)} abate a dívida até chegar a ${brl(f.valor_total, 2)}. Sem comissão na sexta, não desconta nada.`;
+  }
+  const jp = r2(+$('dbJaPago').value || 0); if (t && jp > 0) t += ` Já pago antes: ${brl(jp, 2)} (falta ${brl(Math.max(0, f.valor_total - jp), 2)}).`;
+  $('dbResumo').innerHTML = t ? `<b>Resumo:</b> ${t}${f.forma !== 'direto' ? ' Se a comissão da sexta não cobrir, o que faltar passa para a sexta seguinte.' : ''}` : 'Preencha valor e forma de desconto para ver o resumo.';
+}
+async function salvarDeb() {
+  const f = lerFormDeb();
+  if (!f.pessoa_id) return ($('dbErro').textContent = 'Escolha a pessoa.');
+  if (!f.descricao) return ($('dbErro').textContent = 'Escreva o que é o débito.');
+  if (!(f.valor_total > 0)) return ($('dbErro').textContent = 'Informe o valor total.');
+  if (!f.forma) return ($('dbErro').textContent = 'Escolha como descontar.');
+  if (f.forma === 'fixo' && !(f.valor_sexta > 0)) return ($('dbErro').textContent = 'Informe o valor por sexta.');
+  if (f.forma === 'direto' && !f.primeiro_venc) return ($('dbErro').textContent = 'Informe o primeiro vencimento.');
+  const jaPago = r2(+$('dbJaPago').value || 0);
+  if (jaPago < 0 || jaPago >= f.valor_total) return ($('dbErro').textContent = jaPago >= f.valor_total ? 'O valor já pago é igual ou maior que o total: não há o que lançar.' : 'Valor já pago inválido.');
+  $('dbSalvar').disabled = true; $('dbErro').textContent = 'Salvando…';
+  const { data: novo, error } = await sb.from('debitos').insert(f).select('id').single();
+  if (!error && jaPago > 0) { const r = await sb.from('debito_pagamentos').insert({ debito_id: novo.id, data: iso(TODAY), valor: jaPago, obs: 'Pago antes do lançamento no sistema' }); if (r.error) toast('Débito salvo, mas o valor já pago não foi registrado: ' + r.error.message); }
+  $('dbSalvar').disabled = false;
+  if (error) return ($('dbErro').textContent = 'Não foi possível salvar: ' + error.message);
+  $('dlgDeb').close(); await carregarDebitos(); renderAll(); toast(`Débito lançado para ${(pessoaPorId(f.pessoa_id) || {}).nome}`);
+}
+async function pagouFora(id) {
+  const d = DEB.find(x => x.id === id); if (!d) return;
+  const sug = CONTA[d.id] && CONTA[d.id].prox && CONTA[d.id].prox.direto ? CONTA[d.id].prox.v : restanteDeb(d);
+  const v = prompt(`Quanto ${(pessoaPorId(d.pessoa_id) || {}).nome} pagou direto (dinheiro/Pix)? Falta ${brl(restanteDeb(d), 2)}.`, String(sug).replace('.', ','));
+  if (v == null) return;
+  const valor = r2(+String(v).replace(/\./g, '').replace(',', '.'));
+  if (!(valor > 0)) return toast('Valor inválido');
+  const obs = prompt('Observação (opcional): ex. Pix em 17/10') || null;
+  const { error } = await sb.from('debito_pagamentos').insert({ debito_id: id, data: iso(TODAY), valor, obs });
+  if (error) return toast('Não foi possível registrar: ' + error.message);
+  await carregarDebitos(); renderAll(); toast(`Pagamento de ${brl(valor, 2)} registrado`);
+}
+async function cancelarDeb(id) {
+  const d = DEB.find(x => x.id === id); if (!d) return;
+  const m = prompt(`Cancelar o débito "${d.descricao}" de ${(pessoaPorId(d.pessoa_id) || {}).nome}? O que já foi descontado continua descontado. Motivo:`);
+  if (m == null) return;
+  if (!m.trim()) return toast('Informe o motivo para cancelar');
+  const { error } = await sb.from('debitos').update({ status: 'cancelado', motivo_cancel: m.trim(), cancelado_em: new Date().toISOString(), cancelado_por: ME.id }).eq('id', id);
+  if (error) return toast('Não foi possível cancelar: ' + error.message);
+  await carregarDebitos(); renderAll(); toast('Débito cancelado');
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-deb]'); if (!b) return;
+  const [acao, v] = b.dataset.deb.split(':'), id = +v;
+  if (acao === 'novo') abrirNovoDeb();
+  if (acao === 'ver') { const tr = document.querySelector(`[data-debdet="${id}"]`); if (tr) tr.hidden = !tr.hidden; }
+  if (acao === 'pag') pagouFora(id);
+  if (acao === 'canc') cancelarDeb(id);
+  if (acao === 'delpag') { if (!confirm('Excluir este pagamento por fora?')) return; const { error } = await sb.from('debito_pagamentos').delete().eq('id', id); if (error) return toast('Não foi possível excluir: ' + error.message); await carregarDebitos(); renderAll(); }
+  if (acao === 'sugestao') { $('dbDesc').value = b.textContent; resumoDeb(); }
+});
+(() => {
+  const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+  on('dbSalvar', 'click', salvarDeb); on('dbVoltar', 'click', () => $('dlgDeb').close());
+  ['dbPessoa', 'dbValor', 'dbParc', 'dbFixo', 'dbInicio', 'dbVenc', 'dbPer', 'dbJaPago'].forEach(id => { on(id, 'input', resumoDeb); on(id, 'change', resumoDeb); });
+  document.querySelectorAll('input[name="dbForma"]').forEach(r => r.addEventListener('change', resumoDeb));
+  on('dbBusca', 'input', renderDebitos); on('dbTodos', 'change', renderDebitos);
+})();
+// Quadro "Meus débitos" na Minha comissão
+function meusDebitosHtml(pid) {
+  const l = DEB.filter(d => d.pessoa_id === pid && d.status === 'ativo');
+  if (!l.length) return '<p class="note">Nenhum débito em aberto.</p>';
+  return l.map(d => { const C = CONTA[d.id] || {}, falta = restanteDeb(d);
+    return `<div class="row"><div class="l">${esc(d.descricao)}<span>${formaTxt(d)} · total ${brl(d.valor_total, 2)} · já descontado ${brl(r2((C.descontado || 0) + (C.fora || 0)), 2)}${C.prox ? ` · ${C.prox.direto ? 'próximo vencimento' : 'próxima sexta'}: ${fdate(C.prox.s)} (${brl(C.prox.v, 2)})` : ''}${vencidasDireto(d).length ? ' · <b class="neg">parcela vencida</b>' : ''}</span></div><b class="${falta > 0 ? 'neg' : ''}">${falta > 0 ? 'falta ' + brl(falta, 2) : 'quitado'}</b></div>`; }).join('');
+}
+/* <<< DEBITOS <<< */
 iniciar();
 })();

@@ -1457,22 +1457,89 @@ async function carregarCanc() {
   const { data } = await sb.from('cancelamentos').select('*');
   (data || []).forEach(k => { const c = COTAS.find(x => x.id === k.cota_id); if (c) c.canc = {
     motivo: k.motivo, detalhe: k.detalhe, pedido: parseD(k.pedido_em), arq: k.contrato_arq, por: k.registrado_por,
-    conf: parseD(k.confirmado_em), pct: k.pct_devolucao, ext: k.extrato_arq, info: k.extrato_info }; });
+    conf: parseD(k.confirmado_em), pct: k.pct_devolucao, ext: k.extrato_arq, info: k.extrato_info, doc: k.contrato_conf, hist: k.contrato_hist || [] }; });
 }
+const podeEditarCanc = c => !!(c.canc && ME && (GESTOR || ME.funcao === 'gerente_adm' || c.canc.por === ME.id));
+const podeDesfazerConf = () => !!(ME && (GESTOR || ME.funcao === 'gerente_adm'));
+const CONF_DOC = { manual: 'documento conferido à mão', divergente: 'documento com divergência' };
 function acaoCanc(c) {
-  const k = c.canc;
-  if (k && k.conf) return `<span class="chip c-canc" title="${esc(k.motivo)}${k.detalhe ? ' · ' + esc(k.detalhe) : ''}">Cancelada em ${fdate(k.conf)} · devolve ${k.pct}%</span>`;
-  if (k) return `<span class="chip c-atrasado" title="${esc(k.motivo)}${k.detalhe ? ' · ' + esc(k.detalhe) : ''}">Cancelamento em andamento</span>` +
-    (podeInformar() ? ` <button class="btn sm" data-cconf="${c.id}">Confirmar com extrato</button> <button class="btn ghost sm" data-cdoc="${c.id}">Contrato</button>` : '');
+  const k = c.canc, tip = k ? `${esc(k.motivo)}${k.detalhe ? ' · ' + esc(k.detalhe) : ''}` : '';
+  const doc = k && k.arq ? ` <button class="btn ghost sm" data-cdoc="${c.id}">Contrato</button>` : '';
+  const aviso = k && k.doc && k.doc !== 'ok' ? ` <span class="chip ${k.doc === 'divergente' ? 'c-atrasado' : 'c-inf'}" title="Revisar o documento anexado">${CONF_DOC[k.doc]}</span>` : '';
+  if (k && k.conf) return `<span class="chip c-canc" title="${tip}">Cancelada em ${fdate(k.conf)} · devolve ${k.pct}%</span>${aviso}${doc}` +
+    (podeDesfazerConf() ? ` <button class="btn ghost sm" data-cdesf="${c.id}">Desfazer</button>` : '');
+  if (k) return `<span class="chip c-atrasado" title="${tip}">Cancelamento em andamento</span>${aviso}` +
+    (podeInformar() ? ` <button class="btn sm" data-cconf="${c.id}">Confirmar com extrato</button>${doc}` : doc) +
+    (podeEditarCanc(c) ? ` <button class="btn ghost sm" data-cedit="${c.id}">Editar</button>` : '');
   return podeInformar() && c.status !== 'cancelada' ? `<button class="btn ghost sm" data-canc="${c.id}">Cancelamento</button>` : '';
 }
-function abrirCanc(c) {
-  $('ccTitulo').textContent = `Cancelamento · ${c.cliente}`;
+function abrirCanc(c, editar) {
+  const k = editar ? c.canc : null, dlg = $('dlgCanc');
+  $('ccTitulo').textContent = `${k ? 'Editar cancelamento' : 'Cancelamento'} · ${c.cliente}`;
   const dias = Math.round((TODAY - c.venda) / 864e5);
-  $('ccInfo').textContent = `Venda ${fdate(c.venda)} (${dias} dias) · contrato ${c.contrato || '—'} · ${dias <= 7 ? 'dentro de 7 dias: equipe devolve 100%' : 'depois de 7 dias: equipe devolve 50%'}`;
+  $('ccInfo').textContent = `Venda ${fdate(c.venda)} (${dias} dias) · contrato ${c.contrato || '—'} · grupo ${c.grupo || '—'} · cota ${c.cotaNum || '—'}`;
   $('ccMotivo').innerHTML = '<option value="">Escolha o motivo…</option>' + MOTIVOS_CANC.map(m => `<option>${m}</option>`).join('');
-  $('ccDetalhe').value = ''; $('ccData').value = iso(TODAY); $('ccArq').value = ''; $('ccErro').textContent = '';
-  $('dlgCanc').dataset.alvo = c.id; $('dlgCanc').showModal();
+  $('ccMotivo').value = k ? k.motivo : ''; $('ccDetalhe').value = k ? (k.detalhe || '') : '';
+  $('ccData').value = iso(k && k.pedido ? k.pedido : TODAY); $('ccArq').value = ''; $('ccErro').textContent = ''; $('ccDoc').innerHTML = '';
+  $('ccArqL').firstChild.textContent = k ? 'Trocar o contrato de cancelamento (deixe vazio para manter o atual)' : 'Contrato de cancelamento assinado (foto ou PDF)';
+  $('ccNota').hidden = !!k; $('ccDesfazer').hidden = !k;
+  $('ccSalvar').textContent = k ? 'Salvar alterações' : 'Registrar cancelamento';
+  dlg.dataset.alvo = c.id; dlg.dataset.modo = k ? 'editar' : 'novo'; dlg.doc = null; dlg.showModal();
+}
+// Confere se o documento anexado é do cliente: PDF com texto é lido; foto ou PDF escaneado exige conferência manual
+async function textoPdf(f) {
+  const lib = await carregarPdfjs();
+  const pdf = await lib.getDocument({ data: await f.arrayBuffer() }).promise;
+  let txt = '';
+  for (let i = 1; i <= Math.min(pdf.numPages, 4); i++) { const pg = await pdf.getPage(i); const tc = await pg.getTextContent(); txt += ' ' + tc.items.map(x => x.str).join(' '); }
+  let img = '';
+  try { const pg = await pdf.getPage(1), vp0 = pg.getViewport({ scale: 1 }), vp = pg.getViewport({ scale: 360 / vp0.width });
+    const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+    await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise; img = cv.toDataURL('image/jpeg', .7); } catch (e) { img = ''; }
+  return { txt: txt.replace(/\s+/g, ' '), img };
+}
+function docBateCom(c, txt) {
+  const t = normN(txt), so = t.replace(/[^0-9]/g, ' ');
+  const nome = normN(c.cliente), partes = nome.split(' ').filter(p => p.length > 2);
+  const nomeOk = t.includes(nome) || (partes.length >= 2 && partes.every(p => t.includes(p)));
+  const contratoOk = !!c.contrato && new RegExp(`(^|\\D)${c.contrato}(\\D|$)`).test(so);
+  const cotaOk = !!c.grupo && !!c.cotaNum && new RegExp(`(^|\\D)0*${+c.grupo}(\\D|$)`).test(so) && new RegExp(`(^|\\D)0*${+c.cotaNum}(\\D|$)`).test(so);
+  return { nomeOk, contratoOk, cotaOk };
+}
+async function conferirDoc() {
+  const dlg = $('dlgCanc'), c = COTAS.find(x => x.id === +dlg.dataset.alvo), f = $('ccArq').files[0], box = $('ccDoc');
+  dlg.doc = null; $('ccErro').textContent = ''; if (!f) { box.innerHTML = ''; return; }
+  const marca = (txt) => `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-weight:600"><input type="checkbox" id="ccMarca" style="width:auto;margin-top:3px"> <span>${txt}</span></label>`;
+  const prev = src => src ? `<img src="${src}" alt="Prévia do documento" style="display:block;max-width:100%;max-height:220px;margin-top:8px;border:1px solid var(--line);border-radius:8px">` : '';
+  const nomeC = esc(c.cliente);
+  if (/pdf/i.test(f.type) || /\.pdf$/i.test(f.name)) {
+    box.innerHTML = '<p class="note">Conferindo o documento…</p>';
+    try {
+      const { txt, img } = await textoPdf(f);
+      if (txt.replace(/\s/g, '').length < 40) {
+        dlg.doc = { conf: 'manual', marcar: true };
+        box.innerHTML = `<p class="note">PDF escaneado: não dá para ler o texto. Confira na prévia.</p>${prev(img)}${marca(`Conferi: o documento é de ${nomeC}`)}`;
+        return;
+      }
+      const r = docBateCom(c, txt);
+      if (r.nomeOk && (r.contratoOk || r.cotaOk || !c.contrato)) {
+        dlg.doc = { conf: 'ok', marcar: false };
+        box.innerHTML = `<p style="margin:0;color:var(--pos,#067647);font-weight:600">✓ O documento confere com ${nomeC}${r.contratoOk ? ' · contrato ' + esc(c.contrato) : r.cotaOk ? ' · grupo e cota' : ''}</p>${prev(img)}`;
+      } else if (r.nomeOk) {
+        dlg.doc = { conf: 'ok', marcar: false };
+        box.innerHTML = `<p style="margin:0;color:var(--pos,#067647);font-weight:600">✓ O nome ${nomeC} está no documento</p><p class="note" style="margin:4px 0 0">O número do contrato não foi encontrado; confira na prévia.</p>${prev(img)}`;
+      } else {
+        dlg.doc = { conf: 'divergente', marcar: true };
+        box.innerHTML = `<p class="neg" style="margin:0;font-weight:600">⚠ Este documento não parece ser de ${nomeC}.</p><p class="note" style="margin:4px 0 0">Não encontrei o nome do cliente${c.contrato ? ' nem o contrato ' + esc(c.contrato) : ''} no PDF. Troque o arquivo ou confira com atenção.</p>${prev(img)}${marca(`Conferi e o documento é mesmo de ${nomeC}`)}`;
+      }
+    } catch (e) {
+      dlg.doc = { conf: 'manual', marcar: true };
+      box.innerHTML = `<p class="note">Não consegui ler o PDF (${esc(e.message)}). Confira o arquivo antes de salvar.</p>${marca(`Conferi: o documento é de ${nomeC}`)}`;
+    }
+  } else {
+    dlg.doc = { conf: 'manual', marcar: true };
+    box.innerHTML = `<p class="note">Foto: o sistema não lê a imagem. Confira o nome no documento.</p>${prev(URL.createObjectURL(f))}${marca(`Conferi: o documento é de ${nomeC}`)}`;
+  }
 }
 async function enviarArquivo(id, prefixo, f) {
   const ext = (f.name.split('.').pop() || 'pdf').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'pdf';
@@ -1481,20 +1548,37 @@ async function enviarArquivo(id, prefixo, f) {
   return up.error ? { erro: up.error.message } : { path };
 }
 async function salvarCanc() {
-  const id = +$('dlgCanc').dataset.alvo, c = COTAS.find(x => x.id === id), f = $('ccArq').files[0];
+  const dlg = $('dlgCanc'), editar = dlg.dataset.modo === 'editar';
+  const id = +dlg.dataset.alvo, c = COTAS.find(x => x.id === id), f = $('ccArq').files[0];
   const motivo = $('ccMotivo').value, det = $('ccDetalhe').value.trim(), dt = $('ccData').value;
   if (!motivo) return ($('ccErro').textContent = 'Escolha o motivo.');
   if (motivo === 'Outro' && !det) return ($('ccErro').textContent = 'Descreva o motivo no detalhe.');
-  if (!f) return ($('ccErro').textContent = 'Anexe o contrato de cancelamento assinado.');
-  if (f.size > 10 * 1024 * 1024) return ($('ccErro').textContent = 'Arquivo muito grande (máximo 10 MB).');
+  if (!dt) return ($('ccErro').textContent = 'Informe a data do pedido.');
+  if (!f && !editar) return ($('ccErro').textContent = 'Anexe o contrato de cancelamento assinado.');
+  if (f && f.size > 10 * 1024 * 1024) return ($('ccErro').textContent = 'Arquivo muito grande (máximo 10 MB).');
+  if (f && !dlg.doc) return ($('ccErro').textContent = 'Aguarde a conferência do documento.');
+  if (f && dlg.doc.marcar && !($('ccMarca') && $('ccMarca').checked)) return ($('ccErro').textContent = 'Confira o documento e marque a confirmação antes de salvar.');
   $('ccSalvar').disabled = true; $('ccErro').textContent = 'Enviando…';
-  const up = await enviarArquivo(id, 'canc', f);
-  if (up.erro) { $('ccSalvar').disabled = false; return ($('ccErro').textContent = 'Não foi possível enviar: ' + up.erro); }
-  const { error } = await sb.rpc('registrar_cancelamento', { p_cota: id, p_motivo: motivo, p_detalhe: det, p_pedido: dt, p_arquivo: up.path });
+  let path = null;
+  if (f) { const up = await enviarArquivo(id, 'canc', f); if (up.erro) { $('ccSalvar').disabled = false; return ($('ccErro').textContent = 'Não foi possível enviar: ' + up.erro); } path = up.path; }
+  const conf = f ? dlg.doc.conf : null;
+  const { error } = editar
+    ? await sb.rpc('editar_cancelamento', { p_cota: id, p_motivo: motivo, p_detalhe: det, p_pedido: dt, p_arquivo: path, p_conf: conf })
+    : await sb.rpc('registrar_cancelamento', { p_cota: id, p_motivo: motivo, p_detalhe: det, p_pedido: dt, p_arquivo: path, p_conf: conf });
   $('ccSalvar').disabled = false;
   if (error) return ($('ccErro').textContent = 'Não foi possível salvar: ' + error.message);
-  c.canc = { motivo, detalhe: det, pedido: parseD(dt), arq: up.path, por: ME.id };
-  $('dlgCanc').close(); toast(`Cancelamento de ${c.cliente.split(' ')[0]} registrado. Falta confirmar com o extrato da Disal.`); renderAll();
+  if (editar) Object.assign(c.canc, { motivo, detalhe: det, pedido: parseD(dt) }, path ? { arq: path, doc: conf } : {});
+  else c.canc = { motivo, detalhe: det, pedido: parseD(dt), arq: path, por: ME.id, doc: conf };
+  dlg.close(); toast(editar ? `Cancelamento de ${c.cliente.split(' ')[0]} atualizado` : `Cancelamento de ${c.cliente.split(' ')[0]} registrado. Falta confirmar com o extrato da Disal.`); renderAll();
+}
+async function desfazerCanc(c) {
+  const conf = !!c.canc.conf;
+  if (!confirm(conf ? `Desfazer o cancelamento CONFIRMADO de ${c.cliente}? A cota volta à situação anterior.` : `Desfazer o registro de cancelamento de ${c.cliente}? O cliente volta ao normal.`)) return;
+  const { error } = await sb.rpc('desfazer_cancelamento', { p_cota: c.id });
+  if (error) return toast('Não foi possível desfazer: ' + error.message);
+  if ($('dlgCanc').open) $('dlgCanc').close();
+  if (conf) { toast('Cancelamento desfeito. Atualizando…'); return setTimeout(() => location.reload(), 900); }
+  delete c.canc; toast(`Cancelamento de ${c.cliente.split(' ')[0]} desfeito`); renderAll();
 }
 // Leitura do extrato (PDF da Disal) no próprio navegador
 let pdfjsPronto = null;
@@ -1560,13 +1644,16 @@ async function verArquivo(path) {
   window.open(data.signedUrl, '_blank', 'noopener');
 }
 document.addEventListener('click', e => {
-  const a = e.target.closest('[data-canc],[data-cconf],[data-cdoc]'); if (!a) return;
-  const c = COTAS.find(x => x.id === +(a.dataset.canc || a.dataset.cconf || a.dataset.cdoc)); if (!c) return;
-  if (a.dataset.canc) abrirCanc(c); else if (a.dataset.cconf) abrirConf(c); else if (c.canc && c.canc.arq) verArquivo(c.canc.arq);
+  const a = e.target.closest('[data-canc],[data-cconf],[data-cdoc],[data-cedit],[data-cdesf]'); if (!a) return;
+  const c = COTAS.find(x => x.id === +(a.dataset.canc || a.dataset.cconf || a.dataset.cdoc || a.dataset.cedit || a.dataset.cdesf)); if (!c) return;
+  if (a.dataset.canc) abrirCanc(c); else if (a.dataset.cconf) abrirConf(c); else if (a.dataset.cedit) abrirCanc(c, true);
+  else if (a.dataset.cdesf) desfazerCanc(c); else if (c.canc && c.canc.arq) verArquivo(c.canc.arq);
 });
 (() => {
   const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
   on('ccSalvar', 'click', salvarCanc); on('ccCancelar', 'click', () => $('dlgCanc').close());
+  on('ccArq', 'change', conferirDoc);
+  on('ccDesfazer', 'click', () => { const c = COTAS.find(x => x.id === +$('dlgCanc').dataset.alvo); if (c && c.canc) desfazerCanc(c); });
   on('cfArq', 'change', analisarExtrato); on('cfSalvar', 'click', confirmarCanc); on('cfCancelar', 'click', () => $('dlgCancConf').close());
 })();
 // Resumo de motivos (aparece no filtro "Cancelamentos" da carteira)
@@ -1574,7 +1661,7 @@ function resumoMotivos(lista) {
   const por = {}, porV = {};
   lista.forEach(c => { por[c.canc.motivo] = (por[c.canc.motivo] || 0) + 1; porV[c.vendedor] = (porV[c.vendedor] || 0) + 1; });
   const linhas = o => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<div class="row"><div class="l">${esc(k)}</div><b>${n}</b></div>`).join('');
-  return lista.length ? `<div class="grid2" style="margin-bottom:16px"><div class="panel"><div class="panel-head"><h2>Motivos</h2><span class="note">${lista.length} cancelamento${lista.length > 1 ? 's' : ''}</span></div><div class="list">${linhas(por)}</div></div><div class="panel"><div class="panel-head"><h2>Por vendedor</h2></div><div class="list">${linhas(porV)}</div></div></div>` : '';
+  return lista.length ? `<div class="grid2" style="margin-bottom:16px"><div class="panel"><div class="panel-head"><h2>Motivos</h2><span class="note">${lista.length} cancelamento${lista.length > 1 ? 's' : ''}${lista.some(c => c.canc.doc && c.canc.doc !== 'ok') ? ` · <b class="neg">${lista.filter(c => c.canc.doc && c.canc.doc !== 'ok').length} documento(s) para revisar</b>` : ''}</span></div><div class="list">${linhas(por)}</div></div><div class="panel"><div class="panel-head"><h2>Por vendedor</h2></div><div class="list">${linhas(porV)}</div></div></div>` : '';
 }
 /* <<< CANCELAMENTO <<< */
 iniciar();

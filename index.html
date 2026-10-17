@@ -295,10 +295,11 @@
   <label for="ccMotivo">Motivo<select id="ccMotivo"></select></label>
   <label for="ccDetalhe" style="margin-top:10px">O que o cliente falou<textarea id="ccDetalhe" rows="3" maxlength="500" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)"></textarea></label>
   <label for="ccData" style="margin-top:10px">Data do pedido<input id="ccData" type="date"></label>
-  <label for="ccArq" style="margin-top:10px">Contrato de cancelamento assinado (foto ou PDF)<input id="ccArq" type="file" accept="image/*,application/pdf"></label>
-  <p class="note" style="margin:10px 0 0">O cliente fica como <b>cancelamento em andamento</b>. A confirmação vem depois, com o extrato da Disal mostrando a cota CANCELADA.</p>
+  <label for="ccArq" id="ccArqL" style="margin-top:10px">Contrato de cancelamento assinado (foto ou PDF)<input id="ccArq" type="file" accept="image/*,application/pdf"></label>
+  <div id="ccDoc" style="margin-top:8px"></div>
+  <p class="note" id="ccNota" style="margin:10px 0 0">O cliente fica como <b>cancelamento em andamento</b>. A confirmação vem depois, com o extrato da Disal mostrando a cota CANCELADA.</p>
   <p id="ccErro" class="neg" style="min-height:18px;margin:8px 0 0;font-size:13px"></p>
-  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="btn ghost" id="ccCancelar" type="button">Voltar</button><button class="btn" id="ccSalvar" type="button">Registrar cancelamento</button></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="btn ghost" id="ccDesfazer" type="button" hidden style="margin-right:auto">Desfazer registro</button><button class="btn ghost" id="ccCancelar" type="button">Voltar</button><button class="btn" id="ccSalvar" type="button">Registrar cancelamento</button></div>
 </dialog>
 <dialog id="dlgCancConf" class="dlg">
   <h2 id="cfTitulo" style="margin:0 0 4px">Confirmar cancelamento</h2>

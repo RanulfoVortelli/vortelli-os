@@ -143,13 +143,14 @@
     <div class="top" style="margin-bottom:16px">
       <div><span class="eyebrow">Carteira de clientes</span><h1 id="ctTitulo">Minha carteira</h1><p class="sub">Todos os seus clientes, o que você já recebeu e o que ainda vai receber se eles pagarem em dia. Administrativo e supervisor recebem na 3ª, 4ª e 5ª parcela; o supervisor, só nos clientes que ele mesmo vendeu e fechou.</p></div>
       <div class="toolbar" style="align-items:flex-end"><label for="ctPessoa" id="ctPessoaL" hidden>Pessoa<select id="ctPessoa"></select></label>
-        <label for="ctFiltro">Mostrar<select id="ctFiltro"><option value="receber">Com valor a receber</option><option value="andamento">Em dia</option><option value="atrasada">Com parcela atrasada</option><option value="aguardando">Pagos aguardando Disal</option><option value="risco">Em risco na 2ª</option><option value="estornada">Estornadas</option><option value="concluida">Concluídas</option><option value="todas">Todos</option></select></label>
+        <label for="ctFiltro">Mostrar<select id="ctFiltro"><option value="receber">Com valor a receber</option><option value="andamento">Em dia</option><option value="atrasada">Com parcela atrasada</option><option value="aguardando">Pagos aguardando Disal</option><option value="risco">Em risco na 2ª</option><option value="estornada">Estornadas</option><option value="concluida">Concluídas</option><option value="cancelamentos">Cancelamentos</option><option value="todas">Todos</option></select></label>
         <label for="ctBusca">Buscar<input id="ctBusca" type="search" placeholder="Cliente ou contrato"></label></div>
     </div>
     <div class="kpis" id="kpisCt" style="margin-bottom:16px"></div>
     <div class="grid2" style="margin-bottom:16px;grid-template-columns:1fr">
       <div class="panel"><div class="panel-head"><h2>Previsão por mês</h2><span class="note">pela sexta em que cai o pagamento</span></div><div class="list" id="ctMeses"></div></div>
     </div>
+    <div id="ctMotivos"></div>
     <div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Contrato</th><th>Venda</th><th class="r">Crédito</th><th>Vendedor</th><th>Parcelas</th><th>Próxima</th><th>Situação</th><th class="r">Recebido</th><th class="r">Previsto</th><th class="r">Em risco</th></tr></thead><tbody id="tbCt"></tbody></table></div>
   </section>
 
@@ -287,6 +288,25 @@
   <p class="note" style="margin:10px 0 0">A parcela fica como <b>paga, aguardando a Disal</b>: sai da cobrança, mas a comissão só entra quando o relatório oficial da Disal confirmar.</p>
   <p id="pgErro" class="neg" style="min-height:18px;margin:8px 0 0;font-size:13px"></p>
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="btn ghost" id="pgCancelar" type="button">Cancelar</button><button class="btn" id="pgSalvar" type="button">Salvar</button></div>
+</dialog>
+<dialog id="dlgCanc" class="dlg">
+  <h2 id="ccTitulo" style="margin:0 0 4px">Cancelamento</h2>
+  <p class="note" id="ccInfo" style="margin:0 0 14px"></p>
+  <label for="ccMotivo">Motivo<select id="ccMotivo"></select></label>
+  <label for="ccDetalhe" style="margin-top:10px">O que o cliente falou<textarea id="ccDetalhe" rows="3" maxlength="500" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)"></textarea></label>
+  <label for="ccData" style="margin-top:10px">Data do pedido<input id="ccData" type="date"></label>
+  <label for="ccArq" style="margin-top:10px">Contrato de cancelamento assinado (foto ou PDF)<input id="ccArq" type="file" accept="image/*,application/pdf"></label>
+  <p class="note" style="margin:10px 0 0">O cliente fica como <b>cancelamento em andamento</b>. A confirmação vem depois, com o extrato da Disal mostrando a cota CANCELADA.</p>
+  <p id="ccErro" class="neg" style="min-height:18px;margin:8px 0 0;font-size:13px"></p>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="btn ghost" id="ccCancelar" type="button">Voltar</button><button class="btn" id="ccSalvar" type="button">Registrar cancelamento</button></div>
+</dialog>
+<dialog id="dlgCancConf" class="dlg">
+  <h2 id="cfTitulo" style="margin:0 0 4px">Confirmar cancelamento</h2>
+  <p class="note" id="cfInfo" style="margin:0 0 14px"></p>
+  <label for="cfArq">Extrato do cliente na Disal (PDF)<input id="cfArq" type="file" accept="application/pdf"></label>
+  <div id="cfLeitura" style="margin-top:10px"></div>
+  <p id="cfErro" class="neg" style="min-height:18px;margin:8px 0 0;font-size:13px"></p>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="btn ghost" id="cfCancelar" type="button">Voltar</button><button class="btn" id="cfSalvar" type="button" disabled>Confirmar cancelamento</button></div>
 </dialog>
 </body>
 </html>

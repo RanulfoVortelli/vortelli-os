@@ -50,6 +50,10 @@ h2{font-size:17px;font-weight:700}
 h3{font-size:15px;font-weight:700}
 .sub{color:var(--muted);font-size:14px}
 .sub2{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+.c-inf{background:var(--tint);color:var(--celeste);border:1px solid var(--celeste)}
+.dlg{border:1px solid var(--line);border-radius:14px;padding:20px;max-width:420px;width:calc(100% - 32px);background:var(--surface);color:var(--ink)}
+.dlg::backdrop{background:rgba(10,20,40,.45)}
+.dlg label{display:flex;flex-direction:column;gap:4px;font-size:13px}
 .eyebrow{font-family:var(--f-num);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
 
@@ -97,7 +101,7 @@ tr.total td{font-weight:700;background:var(--surface2)}
 .c-canc{background:transparent;color:var(--muted);text-decoration:line-through}
 .pp{display:flex;gap:3px}
 .pp i{width:14px;height:14px;border-radius:3px;display:inline-block;font-style:normal;font-size:9px;font-family:var(--f-num);text-align:center;line-height:14px;color:#fff}
-.pp .s-pago{background:var(--good)} .pp .s-aberto{background:var(--line);color:var(--muted)} .pp .s-atrasado{background:var(--warn)} .pp .s-nao_pago{background:var(--bad)} .pp .s-cancelado{background:transparent;border:1px dashed var(--line);color:var(--muted)}
+.pp .s-pago{background:var(--good)} .pp .s-informado{background:var(--celeste)} .pp .s-aberto{background:var(--line);color:var(--muted)} .pp .s-atrasado{background:var(--warn)} .pp .s-nao_pago{background:var(--bad)} .pp .s-cancelado{background:transparent;border:1px dashed var(--line);color:var(--muted)}
 
 .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
 label{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:600;color:var(--muted)}

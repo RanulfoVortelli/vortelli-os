@@ -141,12 +141,14 @@ async function carregar(user) {
 }
 function montarCota(c, contatos) {
   const p = {}, venc = {}, disalEm = {};
-  (c.parcelas || []).forEach(x => { p[x.numero] = x.status; venc[x.numero] = parseD(x.vencimento); if (x.disal_em) disalEm[x.numero] = parseD(x.disal_em); });
+  const inf = {};
+  (c.parcelas || []).forEach(x => { p[x.numero] = x.status; venc[x.numero] = parseD(x.vencimento); if (x.disal_em) disalEm[x.numero] = parseD(x.disal_em);
+    if (x.informado_em && x.status === 'aberto') inf[x.numero] = { em: parseD(x.informado_em), por: x.informado_por, at: x.informado_at ? new Date(x.informado_at) : null, arq: x.comprovante }; });
   for (let k = 1; k <= 5; k++) { if (!p[k]) p[k] = k === 1 ? 'pago' : 'aberto'; }
   return {
     id: c.id, contrato: c.contrato, cliente: c.cliente, telefone: c.telefone, credito: Number(c.credito || 0), parcela: Number(c.parcela_valor || 0),
     venda: parseD(c.data_venda), venc, disalEm, p, status: c.status, estornoDoc: c.estorno_documento, recuperacao: parseD(c.recuperacao_data), equipeId: c.equipe_id,
-    vendedor_id: c.vendedor_id, fechador_id: c.fechador_id, adm_id: c.adm_id,
+    vendedor_id: c.vendedor_id, fechador_id: c.fechador_id, adm_id: c.adm_id, inf,
     cpf: c.cpf, grupo: c.grupo, cotaNum: c.cota, venc1: c.vencimento_1, login: c.login_disal, historico: !!c.historico,
     confirmada: c.disal_confirmada !== false, confirmadaEm: parseD(c.disal_confirmada_em) || parseD(c.data_venda),
     vendedor: nomeP(c.vendedor_id), fechador: nomeP(c.fechador_id), adm: c.adm_id ? nomeP(c.adm_id) : 'Sem carteira',
@@ -166,7 +168,7 @@ const veComissoes = () => GESTOR || (ME && ME.funcao === 'gerente_adm');
 const podeLancar = () => GESTOR || (ME && ['gerente', 'administrativo', 'gerente_adm'].includes(ME.funcao));
 const venc = (c, k) => c.venc[k] || addDays(c.venda, 30 * (k - 1));
 // Status mostrado: parcela vencida há mais de 3 dias sem baixa aparece como "atrasado"
-const stView = (c, k) => (c.p[k] === 'aberto' && venc(c, k) < addDays(TODAY, -3)) ? 'atrasado' : c.p[k];
+const stView = (c, k) => (c.p[k] === 'aberto' && c.inf && c.inf[k]) ? 'informado' : (c.p[k] === 'aberto' && venc(c, k) < addDays(TODAY, -3)) ? 'atrasado' : c.p[k];
 
 /* ---------------- Motor de cálculo ---------------- */
 function eventosLoja(c) {
@@ -271,7 +273,7 @@ function despesasMes(ym) {
 }
 function alertasLista() {
   const lim = addDays(TODAY, 15);
-  return COTAS.filter(c => valida(c) && c.p[2] === 'aberto' && venc(c, 2) <= lim && venc(c, 2) >= addDays(TODAY, -45))
+  return COTAS.filter(c => valida(c) && c.p[2] === 'aberto' && !(c.inf && c.inf[2]) && venc(c, 2) <= lim && venc(c, 2) >= addDays(TODAY, -45))
               .sort((a, b) => venc(a, 2) - venc(b, 2));
 }
 const riscoCota = c => c.credito * r('estorno_disal') / 100 + partesVenda(c).partes.reduce((s, x) => s + x.valor, 0) * r('estorno_equipe') / 100;
@@ -365,7 +367,7 @@ function renderAlertas() {
   $('kpisAlert').innerHTML = kpi('Clientes no radar', L.length) + kpi('Vencidas sem baixa', `<span class="neg">${L.filter(c => stView(c, 2) === 'atrasado').length}</span>`) + kpi('Contatos feitos', L.filter(c => c.contato).length) + (GESTOR ? kpi('Dinheiro em risco', brl(L.reduce((s, c) => s + riscoCota(c), 0)), 'Estorno loja + equipe') : kpi('Seus clientes em risco', L.length));
   $('tbAlert').innerHTML = L.length ? L.map(c => `<tr><td class="n">${fdate(venc(c, 2))}</td><td>${esc(c.cliente)}</td><td class="n">${esc(c.telefone || '—')}</td><td>${esc(c.adm)}</td><td>${esc(c.vendedor)}</td><td class="r n">${brl(c.parcela, 2)}</td><td class="r n neg so-ceo">${brl(riscoCota(c))}</td>
     <td>${stView(c, 2) === 'atrasado' ? '<span class="chip c-atrasado">Vencida</span>' : '<span class="chip c-aberto">A vencer</span>'} ${c.contato ? '<span class="chip c-pago">Contato feito</span>' : ''}</td>
-    <td><div class="acts">${c.contato ? '' : `<button class="btn ghost sm" data-contato="${c.id}">Contato feito</button>`}${podeBaixar() ? `<button class="btn sm" data-baixa="${c.id}:pago">Pagou</button><button class="btn ghost sm" data-baixa="${c.id}:nao_pago">Não pagou</button>` : ''}</div></td></tr>`).join('')
+    <td><div class="acts">${c.contato ? '' : `<button class="btn ghost sm" data-contato="${c.id}">Contato feito</button>`}${acaoPagou(c, 2)}${podeBaixar() ? `<button class="btn ghost sm" data-baixa="${c.id}:nao_pago">Não pagou</button>` : ''}</div></td></tr>`).join('')
     : `<tr><td colspan="9" class="empty">Nenhum cliente no radar.</td></tr>`;
 }
 
@@ -1326,6 +1328,7 @@ function linhaCarteira(c, alvo) {
 const situacaoCart = c => {
   if (c.status === 'estornada' || c.p[2] === 'nao_pago') return 'estornada';
   if ([2, 3, 4, 5].some(k => stView(c, k) === 'atrasado')) return 'atrasada';
+  if ([2, 3, 4, 5].some(k => stView(c, k) === 'informado')) return 'aguardando';
   if ([2, 3, 4, 5].every(k => ['pago', 'cancelado'].includes(c.p[k]))) return 'concluida';
   return 'andamento';
 };
@@ -1348,9 +1351,9 @@ function renderCarteira() {
     .sort((a, b) => (a.prox ? +venc(a.c, a.prox) : 9e15) - (b.prox ? +venc(b.c, b.prox) : 9e15));
   const soma = (l, k) => l.reduce((s, x) => s + x[k], 0);
   const lim = addDays(TODAY, 30), prox30 = base.reduce((s, x) => s + x.prev.filter(p => p.data <= lim).reduce((a, p) => a + p.valor, 0), 0);
-  const andamento = base.filter(x => ['andamento', 'atrasada'].includes(situacaoCart(x.c))).length;
+  const andamento = base.filter(x => ['andamento', 'atrasada', 'aguardando'].includes(situacaoCart(x.c))).length;
   $('kpisCt').innerHTML =
-    kpi('Clientes', base.length, `${andamento} em andamento · ${base.filter(x => situacaoCart(x.c) === 'atrasada').length} com parcela atrasada`) +
+    kpi('Clientes', base.length, `${andamento} em andamento · ${base.filter(x => situacaoCart(x.c) === 'atrasada').length} com parcela atrasada · ${base.filter(x => situacaoCart(x.c) === 'aguardando').length} pagos aguardando Disal${base.some(x => [2, 3, 4, 5].some(k => diasSemConfirmar(x.c, k) > INF_ALERTA_DIAS)) ? ` (<b class="neg">${base.filter(x => [2, 3, 4, 5].some(k => diasSemConfirmar(x.c, k) > INF_ALERTA_DIAS)).length} há mais de ${INF_ALERTA_DIAS} dias</b>)` : ''}`) +
     kpi('Já recebido', brl(soma(base, 'recebido'), 2), 'Comissões e recorrências pagas') +
     kpi('Previsão a receber', brl(soma(base, 'previsto'), 2), 'Se os clientes pagarem em dia') +
     kpi('Próximos 30 dias', brl(prox30, 2), 'Parte da previsão') +
@@ -1361,12 +1364,12 @@ function renderCarteira() {
   base.forEach(x => x.prev.forEach(p => { const ym = ymOf(sextaPagamento(p.data)); porMes[ym] = (porMes[ym] || 0) + p.valor; }));
   const meses = Object.keys(porMes).map(Number).sort((a, b) => a - b).slice(0, 6);
   $('ctMeses').innerHTML = meses.length ? meses.map(ym => `<div class="row"><div class="l">${MESES[ym % 12][0].toUpperCase() + MESES[ym % 12].slice(1)} de ${Math.floor(ym / 12)}</div><b>${brl(porMes[ym], 2)}</b></div>`).join('') : '<p class="note">Nada previsto por enquanto.</p>';
-  const sitChip = { andamento: '<span class="chip c-aberto">Em dia</span>', atrasada: '<span class="chip c-atrasado">Atrasada</span>', concluida: '<span class="chip c-pago">Concluída</span>', estornada: '<span class="chip c-canc">Estornada</span>' };
+  const sitChip = { andamento: '<span class="chip c-aberto">Em dia</span>', atrasada: '<span class="chip c-atrasado">Atrasada</span>', concluida: '<span class="chip c-pago">Concluída</span>', estornada: '<span class="chip c-canc">Estornada</span>', aguardando: '<span class="chip c-inf">Pago · aguardando Disal</span>' };
   $('tbCt').innerHTML = L.length ? L.slice(0, 400).map(x => { const c = x.c;
     return `<tr><td>${esc(c.cliente)}<span class="sub2">${esc(c.telefone || 'sem telefone')}</span></td><td class="n">${esc(c.contrato || '—')}</td><td class="n">${fdate(c.venda)}</td><td class="r n">${brl(c.credito)}</td>
       <td>${esc(c.vendedor)}<span class="sub2">adm: ${esc(c.adm)}</span></td>
       <td><span class="pp">${[1, 2, 3, 4, 5].map(k => { const s = stView(c, k); return `<i class="s-${s}" title="${k}ª: ${s} · venc. ${fdate(venc(c, k))}">${k}</i>`; }).join('')}</span></td>
-      <td class="n">${x.prox ? `${x.prox}ª · ${fdate(venc(c, x.prox))}` : '—'}</td><td>${sitChip[situacaoCart(c)]}</td>
+      <td class="n">${x.prox ? `${x.prox}ª · ${fdate(venc(c, x.prox))}` : '—'}${x.prox ? `<div class="acts" style="margin-top:4px">${acaoPagou(c, x.prox)}</div>` : ''}</td><td>${sitChip[situacaoCart(c)]}</td>
       <td class="r n">${x.recebido ? brl(x.recebido, 2) : '—'}</td><td class="r n">${x.previsto ? `<strong>${brl(x.previsto, 2)}</strong>` : '—'}${x.semBaixa ? `<span class="sub2">+ ${brl(x.semBaixa, 2)} vencida sem baixa</span>` : ''}</td><td class="r n ${x.risco ? 'neg' : ''}">${x.risco ? '−' + brl(x.risco, 2) : '—'}</td></tr>`; }).join('') +
     `<tr class="total"><td colspan="8">Total (${L.length} clientes)</td><td class="r n">${brl(soma(L, 'recebido'), 2)}</td><td class="r n">${brl(soma(L, 'previsto'), 2)}</td><td class="r n neg">${soma(L, 'risco') ? '−' + brl(soma(L, 'risco'), 2) : '—'}</td></tr>`
     : `<tr><td colspan="11" class="empty">Nenhum cliente neste filtro.</td></tr>`;
@@ -1374,5 +1377,64 @@ function renderCarteira() {
 ['ctPessoa', 'ctFiltro'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('change', renderCarteira); });
 (() => { const el = document.getElementById('ctBusca'); if (el) el.addEventListener('input', renderCarteira); })();
 /* <<< CARTEIRA <<< */
+/* >>> PAGOU >>> */
+// "Cliente pagou" com comprovante: administrativo, supervisor, gerente adm e CEO (vendedor não).
+// A parcela fica "paga – aguardando Disal" até o relatório oficial da Disal dar a baixa.
+const podeInformar = () => GESTOR || (ME && ['gerente', 'administrativo', 'gerente_adm'].includes(ME.funcao));
+const INF_ALERTA_DIAS = 10;
+const diasSemConfirmar = (c, k) => c.inf && c.inf[k] ? Math.floor((TODAY - (c.inf[k].at || c.inf[k].em)) / 864e5) : 0;
+function acaoPagou(c, k) {
+  if (!k || c.status === 'cancelada') return '';
+  const i = c.inf && c.inf[k];
+  if (i) {
+    const d = diasSemConfirmar(c, k), late = d > INF_ALERTA_DIAS;
+    return `<span class="chip ${late ? 'c-atrasado' : 'c-inf'}" title="Pago em ${fdate(i.em)} · registrado por ${esc(nomeP(i.por))}">${k}ª paga · aguardando Disal${late ? ` há ${d} dias` : ''}</span>`
+      + (podeInformar() ? ` <button class="btn ghost sm" data-comprov="${c.id}:${k}">Comprovante</button> <button class="btn ghost sm" data-desfaz="${c.id}:${k}" title="Desfazer o informe">Desfazer</button>` : '');
+  }
+  return podeInformar() && c.p[k] === 'aberto' ? `<button class="btn sm" data-pagou="${c.id}:${k}">Cliente pagou</button>` : '';
+}
+function abrirPagou(c, k) {
+  $('pgTitulo').textContent = `${c.cliente} · ${k}ª parcela`;
+  $('pgInfo').textContent = `Vencimento ${fdate(venc(c, k))} · ${brl(c.parcela, 2)} · contrato ${c.contrato || '—'}`;
+  $('pgData').value = iso(TODAY); $('pgArq').value = ''; $('pgErro').textContent = '';
+  $('dlgPagou').dataset.alvo = `${c.id}:${k}`; $('dlgPagou').showModal();
+}
+async function salvarPagou() {
+  const [id, k] = $('dlgPagou').dataset.alvo.split(':').map(Number);
+  const c = COTAS.find(x => x.id === id), f = $('pgArq').files[0], dt = $('pgData').value;
+  if (!f) { $('pgErro').textContent = 'Anexe o comprovante (foto ou PDF).'; return; }
+  if (f.size > 10 * 1024 * 1024) { $('pgErro').textContent = 'Arquivo muito grande (máximo 10 MB).'; return; }
+  if (!dt) { $('pgErro').textContent = 'Informe a data do pagamento.'; return; }
+  $('pgSalvar').disabled = true; $('pgErro').textContent = 'Enviando…';
+  const ext = (f.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'jpg';
+  const path = `${id}/${k}-${Date.now()}.${ext}`;
+  const up = await sb.storage.from('comprovantes').upload(path, f, { contentType: f.type || undefined });
+  if (up.error) { $('pgSalvar').disabled = false; $('pgErro').textContent = 'Não foi possível enviar o comprovante: ' + up.error.message; return; }
+  const { error } = await sb.rpc('informar_pagamento', { p_cota: id, p_num: k, p_data: dt, p_arquivo: path });
+  $('pgSalvar').disabled = false;
+  if (error) { $('pgErro').textContent = 'Não foi possível salvar: ' + error.message; return; }
+  (c.inf ||= {})[k] = { em: parseD(dt), por: ME.id, at: TODAY, arq: path };
+  $('dlgPagou').close(); toast(`${k}ª parcela de ${c.cliente.split(' ')[0]}: paga, aguardando a Disal`); renderAll();
+}
+async function verComprovante(c, k) {
+  const i = c.inf && c.inf[k]; if (!i || !i.arq) return toast('Sem comprovante');
+  const { data, error } = await sb.storage.from('comprovantes').createSignedUrl(i.arq, 300);
+  if (error) return toast('Não foi possível abrir: ' + error.message);
+  window.open(data.signedUrl, '_blank', 'noopener');
+}
+async function desfazerPagou(c, k) {
+  const { error } = await sb.rpc('desfazer_informe', { p_cota: c.id, p_num: k });
+  if (error) return toast('Não foi possível desfazer: ' + error.message);
+  if (c.inf) delete c.inf[k]; toast('Informe desfeito'); renderAll();
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-pagou],[data-comprov],[data-desfaz]'); if (!a) return;
+  const [id, k] = (a.dataset.pagou || a.dataset.comprov || a.dataset.desfaz).split(':').map(Number);
+  const c = COTAS.find(x => x.id === id); if (!c) return;
+  if (a.dataset.pagou) abrirPagou(c, k); else if (a.dataset.comprov) verComprovante(c, k); else desfazerPagou(c, k);
+});
+(() => { const s = document.getElementById('pgSalvar'); if (s) s.addEventListener('click', salvarPagou);
+  const x = document.getElementById('pgCancelar'); if (x) x.addEventListener('click', () => $('dlgPagou').close()); })();
+/* <<< PAGOU <<< */
 iniciar();
 })();

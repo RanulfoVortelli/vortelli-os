@@ -143,7 +143,7 @@
     <div class="top" style="margin-bottom:16px">
       <div><span class="eyebrow">Carteira de clientes</span><h1 id="ctTitulo">Minha carteira</h1><p class="sub">Todos os seus clientes, o que você já recebeu e o que ainda vai receber se eles pagarem em dia. Administrativo e supervisor recebem na 3ª, 4ª e 5ª parcela; o supervisor, só nos clientes que ele mesmo vendeu e fechou.</p></div>
       <div class="toolbar" style="align-items:flex-end"><label for="ctPessoa" id="ctPessoaL" hidden>Pessoa<select id="ctPessoa"></select></label>
-        <label for="ctFiltro">Mostrar<select id="ctFiltro"><option value="receber">Com valor a receber</option><option value="andamento">Em dia</option><option value="atrasada">Com parcela atrasada</option><option value="risco">Em risco na 2ª</option><option value="estornada">Estornadas</option><option value="concluida">Concluídas</option><option value="todas">Todos</option></select></label>
+        <label for="ctFiltro">Mostrar<select id="ctFiltro"><option value="receber">Com valor a receber</option><option value="andamento">Em dia</option><option value="atrasada">Com parcela atrasada</option><option value="aguardando">Pagos aguardando Disal</option><option value="risco">Em risco na 2ª</option><option value="estornada">Estornadas</option><option value="concluida">Concluídas</option><option value="todas">Todos</option></select></label>
         <label for="ctBusca">Buscar<input id="ctBusca" type="search" placeholder="Cliente ou contrato"></label></div>
     </div>
     <div class="kpis" id="kpisCt" style="margin-bottom:16px"></div>
@@ -279,5 +279,14 @@
   </section>
 </main>
 </div>
+<dialog id="dlgPagou" class="dlg">
+  <h2 id="pgTitulo" style="margin:0 0 4px">Cliente pagou</h2>
+  <p class="note" id="pgInfo" style="margin:0 0 14px"></p>
+  <label for="pgData">Data do pagamento<input id="pgData" type="date"></label>
+  <label for="pgArq" style="margin-top:10px">Comprovante (foto ou PDF)<input id="pgArq" type="file" accept="image/*,application/pdf"></label>
+  <p class="note" style="margin:10px 0 0">A parcela fica como <b>paga, aguardando a Disal</b>: sai da cobrança, mas a comissão só entra quando o relatório oficial da Disal confirmar.</p>
+  <p id="pgErro" class="neg" style="min-height:18px;margin:8px 0 0;font-size:13px"></p>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="btn ghost" id="pgCancelar" type="button">Cancelar</button><button class="btn" id="pgSalvar" type="button">Salvar</button></div>
+</dialog>
 </body>
 </html>

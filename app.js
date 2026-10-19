@@ -1455,7 +1455,7 @@ function renderCarteira() {
   $('ctMeses').innerHTML = meses.length ? meses.map(ym => `<div class="row"><div class="l">${MESES[ym % 12][0].toUpperCase() + MESES[ym % 12].slice(1)} de ${Math.floor(ym / 12)}</div><b>${brl(porMes[ym], 2)}</b></div>`).join('') : '<p class="note">Nada previsto por enquanto.</p>';
   const sitChip = { andamento: '<span class="chip c-aberto">Em dia</span>', atrasada: '<span class="chip c-atrasado">Atrasada</span>', concluida: '<span class="chip c-pago">Concluída</span>', estornada: '<span class="chip c-canc">Estornada</span>', aguardando: '<span class="chip c-inf">Pago · aguardando Disal</span>', cancelando: '<span class="chip c-atrasado">Cancelamento em andamento</span>', cancelada: '<span class="chip c-canc">Cancelada</span>' };
   $('tbCt').innerHTML = L.length ? L.slice(0, 400).map(x => { const c = x.c;
-    return `<tr><td>${esc(c.cliente)}<span class="sub2">${esc(c.telefone || 'sem telefone')}</span></td><td class="n">${esc(c.contrato || '—')}</td><td class="n">${fdate(c.venda)}</td><td class="r n">${brl(c.credito)}</td>
+    return `<tr><td>${esc(c.cliente)}<span class="sub2">${esc(c.telefone || 'sem telefone')}${podeInformar() ? ` · <button type="button" class="linkbtn" style="font-size:11px" data-tel="${c.id}">editar</button>` : ''}</span></td><td class="n">${esc(c.contrato || '—')}</td><td class="n">${fdate(c.venda)}</td><td class="r n">${brl(c.credito)}</td>
       <td>${esc(c.vendedor)}<span class="sub2">adm: ${esc(c.adm)}</span></td>
       <td><span class="pp">${[1, 2, 3, 4, 5].map(k => { const s = stView(c, k); return `<i class="s-${s}" title="${k}ª: ${s} · venc. ${fdate(venc(c, k))}">${k}</i>`; }).join('')}</span></td>
       <td class="n">${x.prox ? `${x.prox}ª · ${fdate(venc(c, x.prox))}` : '—'}<div class="acts" style="margin-top:4px">${x.prox && !c.canc ? acaoPagou(c, x.prox) : ''}${acaoCanc(c)}</div></td><td>${sitChip[situacaoCart(c)]}</td>
@@ -1956,5 +1956,19 @@ function meusDebitosHtml(pid) {
     return `<div class="row"><div class="l">${esc(d.descricao)}<span>${formaTxt(d)} · total ${brl(d.valor_total, 2)} · já descontado ${brl(r2((C.descontado || 0) + (C.fora || 0)), 2)}${C.prox ? ` · ${C.prox.direto ? 'próximo vencimento' : 'próxima sexta'}: ${fdate(C.prox.s)} (${brl(C.prox.v, 2)})` : ''}${vencidasDireto(d).length ? ' · <b class="neg">parcela vencida</b>' : ''}</span></div><b class="${falta > 0 ? 'neg' : ''}">${falta > 0 ? 'falta ' + brl(falta, 2) : 'quitado'}</b></div>`; }).join('');
 }
 /* <<< DEBITOS <<< */
+/* >>> TELEFONE >>> */
+// Corrigir o telefone do cliente direto na carteira (administrativo, supervisor, gerente adm e CEO)
+async function editarTelefone(c) {
+  const v = prompt(`Telefone de ${c.cliente} (com DDD):`, c.telefone || '');
+  if (v == null) return;
+  const dig = v.replace(/\D/g, '');
+  if (dig && !(dig.length === 10 || dig.length === 11)) return toast('Telefone inválido: use DDD + número (10 ou 11 dígitos).');
+  const tel = dig.length === 11 ? `${dig.slice(0, 2)} ${dig.slice(2, 3)} ${dig.slice(3, 7)}-${dig.slice(7)}` : dig.length === 10 ? `${dig.slice(0, 2)} ${dig.slice(2, 6)}-${dig.slice(6)}` : null;
+  const { error } = await sb.from('cotas').update({ telefone: tel }).eq('id', c.id);
+  if (error) return toast('Não foi possível salvar: ' + error.message);
+  c.telefone = tel; toast(`Telefone de ${c.cliente.split(' ')[0]} atualizado`); renderAll();
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-tel]'); if (!b) return; const c = COTAS.find(x => x.id === +b.dataset.tel); if (c) editarTelefone(c); });
+/* <<< TELEFONE <<< */
 iniciar();
 })();

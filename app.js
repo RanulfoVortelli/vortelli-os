@@ -30,6 +30,7 @@ if (!CFG.SUPABASE_URL || !CFG.SUPABASE_ANON_KEY) {
   document.body.innerHTML = '<p style="padding:24px">Configuração do Supabase ausente em config.js.</p>';
   return;
 }
+const HASH0 = location.hash;   // guardado antes de o Supabase ler e limpar o endereço
 const sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
 
 /* ---------------- Estado ---------------- */
@@ -75,11 +76,20 @@ async function enviarLinkSenha(tipo) {
   const { error } = tipo === 'primeiro'
     ? await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: voltarAqui + '?definir=1', shouldCreateUser: true } })
     : await sb.auth.resetPasswordForEmail(email, { redirectTo: voltarAqui + '?definir=1' });
-  $('loginMsg').textContent = error ? 'Não foi possível enviar: ' + error.message : 'Enviamos um link para ' + email + '. Abra o e-mail neste aparelho e toque no link para criar a sua senha.';
+  $('loginMsg').textContent = error ? 'Não foi possível enviar: ' + error.message : 'Enviamos um link para ' + email + '. Abra o e-mail mais recente neste aparelho e toque no link em até 1 hora. Links de e-mails anteriores deixam de valer.';
 }
 $('btnPrimeiro').addEventListener('click', () => enviarLinkSenha('primeiro'));
 $('btnEsqueci').addEventListener('click', () => enviarLinkSenha('esqueci'));
 let definirSenha = new URLSearchParams(location.search).has('definir');
+// Link do e-mail que falhou (já usado, expirado ou substituído por um convite mais novo): explica e orienta
+(() => {
+  const hp = new URLSearchParams(HASH0.slice(1)); if (!hp.get('error')) return;
+  const cod = hp.get('error_code') || '';
+  definirSenha = false; history.replaceState(null, '', voltarAqui);
+  $('loginMsg').innerHTML = cod === 'otp_expired'
+    ? '<b>Esse link não vale mais</b>: ele já foi usado, passou de 1 hora ou chegou um convite mais novo depois dele. Digite o seu e-mail acima e toque em <b>Primeiro acesso: criar minha senha</b>. Abra só o e-mail mais recente, neste mesmo aparelho.'
+    : 'Não foi possível entrar pelo link (' + esc((hp.get('error_description') || cod).replace(/\+/g, ' ')) + '). Digite o seu e-mail acima e peça um link novo em <b>Primeiro acesso</b>.';
+})();
 function mostrarNovaSenha() { $('app').hidden = true; $('login').hidden = false; $('formLogin').hidden = true; $('formNovaSenha').hidden = false; $('novaSenha').focus(); }
 $('formNovaSenha').addEventListener('submit', async ev => {
   ev.preventDefault();
@@ -482,7 +492,7 @@ async function convidar(p, email) {
   const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname + '?definir=1', shouldCreateUser: true } });
   renderUsuarios();
   if (error) return toast(/rate/i.test(error.message) ? 'Limite de e-mails por hora atingido. O e-mail foi salvo; reenvie o convite mais tarde.' : 'Não foi possível enviar: ' + error.message);
-  toast('Convite enviado para ' + email);
+  toast('Convite enviado para ' + email + '. Peça para abrir só o e-mail mais recente, em até 1 hora (os anteriores deixam de valer).');
 }
 /* ---------------- Ranking e desempenho ---------------- */
 function statsVendedor(id, ym) {   // ym aqui é a quinzena (qz)

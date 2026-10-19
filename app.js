@@ -963,12 +963,84 @@ async function abrirConferencia() {
   try { if (!CF.carregado) await carregarBaseConferencia(); } catch (e) { $('cfConteudo').innerHTML = `<div class="panel"><p class="neg">Não foi possível abrir a conferência: ${esc(e.message || e)}</p></div>`; return; }
   renderConferencia();
 }
+/* Relatório da Disal em PDF ou imagem: monta as mesmas linhas da planilha para a conferência */
+const LIB_OCR = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+const PROD_DISAL = /^(AUTOM[OÓ]VE(?:L|IS)|IM[OÓ]VE(?:L|IS)|MOTOCICLETAS?|MOTOS?|CAMINH[AÃ]O|CAMINH[OÕ]ES|PESADOS?|SERVI[CÇ]OS?|VE[IÍ]CULOS?|N[AÁ]UTICOS?|AGR[IÍ]COLAS?|ELETRO\w*)$/i;
+const RE_LINHA_DISAL = /^(\d{6,8})\s+(\d{3,6}\/[\d.]+)\s+(.+?)\s+(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})\s+(\d{1,3})\s+(-?[\d.]+,\d{2})\s+(-?[\d.]+,\d{2})\s+(-?[\d.]+,\d{2})\s+(-?[\d.]+,\d{2})\s+(-?[\d.]+,\d{2})\s*(.*)$/;
+// itens: [{ s: texto, x, y, p: página }] com y maior = mais acima na página
+function linhasDisal(itens, tol) {
+  const l = itens.filter(i => String(i.s || '').trim()).sort((a, b) => a.p - b.p || b.y - a.y || a.x - b.x), out = [];
+  l.forEach(i => { const u = out[out.length - 1]; if (u && u.p === i.p && Math.abs(u.y - i.y) <= tol) u.itens.push(i); else out.push({ p: i.p, y: i.y, itens: [i] }); });
+  out.forEach(L => { L.itens.sort((a, b) => a.x - b.x); L.txt = L.itens.map(i => i.s.trim()).join(' ').replace(/\s+/g, ' ').trim(); });
+  return out;
+}
+function rowsDeItensDisal(itens, tol) {
+  const rows = [], HEAD = ['Contrato', 'Cota', 'Cliente', 'Data Venda', 'Pcl', 'Base (R$)', 'Comissão Venda(R$)', 'Est. Comis Venda(R$)', 'Comissão Entrega(R$)', 'Est. Comis Entrega(R$)', 'Vendedor'];
+  let cur = null, cab = false;
+  linhasDisal(itens, tol).forEach(L => {
+    const t = L.txt;
+    if (/Border[ôo]\s*:/i.test(t)) { rows.push([t], [], HEAD); cab = true; cur = null; return; }
+    if (!cab) { const lg = t.match(/^(\d{4,}\s*-\s*[A-ZÀ-Ú][A-ZÀ-Ú .&]*?)(?=\s+TOTAL|\s{2,}|$)/); if (lg) rows.push([lg[1].trim()]); return; }
+    if (/^Contrato\b|Totais|TOTAL/i.test(t)) { cur = null; return; }
+    // linha principal: tira o produto (AUTOMOVEL etc.) que fica entre o cliente e as datas
+    const iData = L.itens.findIndex(i => /^\d{2}\/\d{2}\/\d{4}$/.test(i.s.trim()));
+    const limpos = L.itens.filter((i, k) => !(iData > 0 && k < iData && PROD_DISAL.test(i.s.trim())));
+    const m = limpos.map(i => i.s.trim()).join(' ').replace(/\s+/g, ' ').match(RE_LINHA_DISAL);
+    if (m) {
+      const row = [m[1], m[2], m[3], m[4], m[6], m[7], m[8], m[9], m[10], m[11], m[12].trim()];
+      rows.push(row);
+      const numIdx = L.itens.map((i, k) => /^-?[\d.]+,\d{2}$/.test(i.s.trim()) ? k : -1).filter(k => k >= 0);
+      const depois = numIdx.length ? L.itens.slice(numIdx[numIdx.length - 1] + 1).find(i => /[A-Za-zÀ-ú]/.test(i.s)) : null;
+      cur = { row, p: L.p, xData: iData >= 0 ? L.itens[iData].x : Infinity, xVend: depois ? depois.x : Infinity };
+      return;
+    }
+    // continuação: o nome do cliente ou do vendedor quebrou para a linha de baixo
+    if (!cur || cur.p !== L.p) { cur = null; return; }
+    L.itens.forEach(i => {
+      const s = i.s.trim(); if (!s || /\d/.test(s) || PROD_DISAL.test(s)) return;
+      if (i.x >= cur.xVend - 3) cur.row[10] = (cur.row[10] + ' ' + s).trim();
+      else if (i.x < cur.xData - 3) cur.row[2] = (cur.row[2] + ' ' + s).trim();
+    });
+  });
+  return rows;
+}
+async function itensDePdfDisal(file) {
+  const lib = await carregarPdfjs();
+  const pdf = await lib.getDocument({ data: await file.arrayBuffer() }).promise, itens = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const pg = await pdf.getPage(p), tc = await pg.getTextContent();
+    tc.items.forEach(it => { if (it.str && it.str.trim()) itens.push({ s: it.str, x: it.transform[4], y: it.transform[5], p }); });
+  }
+  return itens;
+}
+async function itensDeImagemDisal(file) {
+  await carregarScript(LIB_OCR, 'Tesseract');
+  const r = await window.Tesseract.recognize(file, 'por');
+  const ws = (r.data.words || []).map(w => ({ s: w.text, x: w.bbox.x0, y: -w.bbox.y0, h: w.bbox.y1 - w.bbox.y0, p: 1 }));
+  const hs = ws.map(w => w.h).sort((a, b) => a - b), hMed = hs.length ? hs[Math.floor(hs.length / 2)] : 10;
+  return { itens: ws, tol: Math.max(3, hMed * 0.6) };
+}
+async function rowsDoArquivoDisal(file) {
+  const nome = (file.name || '').toLowerCase(), tipo = file.type || '';
+  if (/pdf/.test(tipo) || nome.endsWith('.pdf')) {
+    const itens = await itensDePdfDisal(file);
+    if (itens.length < 20) throw new Error('o PDF não tem texto (parece escaneado). Tire um print da tela e suba como imagem.');
+    return rowsDeItensDisal(itens, 1.5);
+  }
+  if (/^image\//.test(tipo) || /\.(png|jpe?g|webp)$/.test(nome)) {
+    toast('Lendo a imagem… pode levar alguns segundos.');
+    const { itens, tol } = await itensDeImagemDisal(file);
+    return rowsDeItensDisal(itens, tol);
+  }
+  await carregarScript(LIB_XLSX, 'XLSX');
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+}
 async function lerArquivo(file) {
   if (!file) return;
   try {
-    await carregarScript(LIB_XLSX, 'XLSX'); if (!CF.carregado) await carregarBaseConferencia();
-    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+    if (!CF.carregado) await carregarBaseConferencia();
+    const rows = await rowsDoArquivoDisal(file);
     const rels = lerRelatorio(rows, file.name);
     if (!rels.length) return toast('Não encontrei o borderô nesse arquivo. É o relatório "Comissões a pagar" da Disal?');
     if (rels.length > 1) toast(`O arquivo tem ${rels.length} borderôs; abrindo o primeiro (${rels[0].bordero}).`);

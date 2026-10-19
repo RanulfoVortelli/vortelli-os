@@ -436,16 +436,41 @@ function renderManual() { $('manual').innerHTML = MANUAL.map(([t, l]) => `<div c
 
 function renderUsuarios() {
   if (!GESTOR) return;
+  if (ACESSOS === null) { ACESSOS = false; carregarAcessos(); }
   const sel = $('fuEquipe').value;
   $('fuEquipe').innerHTML = '<option value="">Sem equipe</option>' + EQUIPES.map(e => `<option value="${e.id}">${esc(e.nome)}</option>`).join('');
   $('fuEquipe').value = sel;
   const lista = [...PESSOAS].sort((a, b) => (b.ativo - a.ativo) || a.nome.localeCompare(b.nome));
   $('tbUsuarios').innerHTML = lista.map(p => {
-    const st = !p.ativo ? '<span class="chip c-canc">Inativo</span>' : p.user_id ? '<span class="chip c-pago">Acesso ativo</span>' : p.email ? '<span class="chip c-atrasado">Convite enviado</span>' : '<span class="chip c-aberto">Sem e-mail</span>';
-    const acao = p.ativo && !p.user_id ? `<button class="btn sm" data-convidar="${p.id}">${p.email ? 'Reenviar convite' : 'Salvar e convidar'}</button>` : '';
+    const ac = ACESSOS && ACESSOS[p.id], entrou = ac ? ac.entrou : !!p.user_id, eu = ME && p.id === ME.id;
+    const st = !p.ativo ? '<span class="chip c-canc">Inativo</span>' : p.user_id && entrou ? `<span class="chip c-pago" title="${ac && ac.ultimo ? 'Último acesso ' + new Date(ac.ultimo).toLocaleString('pt-BR') : ''}">Acesso ativo</span>` : p.user_id ? '<span class="chip c-atrasado" title="O login foi criado, mas a pessoa ainda não entrou. Se o e-mail estiver errado, use Trocar e-mail.">Aguardando 1º acesso</span>' : p.email ? '<span class="chip c-atrasado">Convite enviado</span>' : '<span class="chip c-aberto">Sem e-mail</span>';
+    const acao = !p.ativo ? '' : !p.user_id ? `<button class="btn sm" data-convidar="${p.id}">${p.email ? 'Reenviar convite' : 'Salvar e convidar'}</button>` : eu ? '' :
+      `${entrou ? '' : `<button class="btn sm" data-reconvidar="${p.id}">Reenviar convite</button> `}<button class="btn ghost sm" data-trocaremail="${p.id}">Trocar e-mail</button>`;
     return `<tr><td>${esc(p.nome)}</td><td>${funcaoNome(p)}</td><td>${esc(equipeNome(p.equipe_id))}</td><td><input type="email" aria-label="E-mail de ${esc(p.nome)}" value="${esc(p.email || '')}" data-email-de="${p.id}" placeholder="email@exemplo.com" style="min-width:220px" ${p.user_id ? 'disabled' : ''}></td><td>${st}</td><td>${acao}</td></tr>`;
   }).join('');
 }
+// Situação real do login (entrou ou não) e troca de e-mail de acesso — só o CEO
+let ACESSOS = null;
+async function carregarAcessos() {
+  const { data, error } = await sb.rpc('acessos_status'); if (error) return;
+  ACESSOS = {}; (data || []).forEach(x => { ACESSOS[x.pessoa_id] = { entrou: x.entrou, ultimo: x.ultimo_acesso }; }); renderUsuarios();
+}
+async function trocarEmail(p) {
+  const novo = (prompt(`Novo e-mail de acesso de ${p.nome}:\n(atual: ${p.email || '—'})`, '') || '').trim().toLowerCase();
+  if (!novo) return;
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(novo)) return toast('Digite um e-mail válido');
+  if (!confirm(`Trocar o acesso de ${p.nome} para ${novo}?\nO login com o e-mail antigo será desligado e um convite novo será enviado.`)) return;
+  const { data, error } = await sb.rpc('trocar_email_pessoa', { p_pessoa: p.id, p_email: novo });
+  if (error) return toast('Não foi possível trocar: ' + error.message);
+  p.email = novo; p.user_id = null; if (ACESSOS) delete ACESSOS[p.id];
+  toast(`E-mail trocado (${data}). Enviando convite…`);
+  await convidar(p, novo); setTimeout(async () => { const { data: up } = await sb.from('pessoas').select('id,user_id').eq('id', p.id).maybeSingle(); if (up) p.user_id = up.user_id; carregarAcessos(); }, 2500);
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-trocaremail],[data-reconvidar]'); if (!t) return;
+  const p = pessoaPorId(t.dataset.trocaremail || t.dataset.reconvidar); if (!p) return;
+  if (t.dataset.trocaremail) trocarEmail(p); else convidar(p, p.email);
+});
 async function convidar(p, email) {
   email = (email || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Digite um e-mail válido');

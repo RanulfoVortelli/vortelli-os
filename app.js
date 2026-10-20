@@ -163,7 +163,7 @@ function montarCota(c, contatos) {
     venda: parseD(c.data_venda), venc, disalEm, p, status: c.status, estornoDoc: c.estorno_documento, recuperacao: parseD(c.recuperacao_data), equipeId: c.equipe_id,
     vendedor_id: c.vendedor_id, fechador_id: c.fechador_id, adm_id: c.adm_id, inf,
     cpf: c.cpf, grupo: c.grupo, cotaNum: c.cota, venc1: c.vencimento_1, login: c.login_disal, historico: !!c.historico,
-    confirmada: c.disal_confirmada !== false, confirmadaEm: parseD(c.disal_confirmada_em) || parseD(c.data_venda),
+    confirmada: c.disal_confirmada !== false, antecipada: !!c.comissao_antecipada, confirmadaEm: parseD(c.disal_confirmada_em) || parseD(c.data_venda),
     vendedor: nomeP(c.vendedor_id), fechador: nomeP(c.fechador_id), adm: c.adm_id ? nomeP(c.adm_id) : 'Sem carteira',
     equipe: equipeNome(c.equipe_id || (pessoaPorId(c.vendedor_id) || {}).equipe_id), contato: contatos.has(c.id)
   };
@@ -173,6 +173,8 @@ const incompleta = c => valida(c) && !c.historico && (!c.contrato || !c.grupo ||
 // Base da comissão da venda: a data em que a Disal confirmou (ou a venda, se confirmou antes)
 const semanaDisal = d => addDays(d, -7);   // sextaPagamento(d - 7) = sexta da semana do borderô
 const baseVenda = c => c.confirmadaEm && semanaDisal(c.confirmadaEm) > c.venda ? semanaDisal(c.confirmadaEm) : c.venda;
+// Comissão antecipada pela loja: a equipe recebe na sexta da semana da venda, mesmo sem a Disal, e não recebe de novo depois
+const baseEquipe = c => c.antecipada ? c.venda : baseVenda(c);
 const dataParcela = (c, k) => c.disalEm && c.disalEm[k] ? semanaDisal(c.disalEm[k]) : venc(c, k);
 const soDig = s => String(s || '').replace(/\D/g, '');
 const fmtCpf = s => { const d = soDig(s); return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : (s || ''); };
@@ -235,8 +237,8 @@ const ativoEm = (id, d) => { const p = pessoaPorId(id); return !(p && p.data_sai
 function eventosEquipe(c) {
   // Cancelamento confirmado pelo extrato da Disal: se a comissão já tinha sido paga, devolve 100% (até 7 dias da venda) ou 50%
   if (c.status === 'cancelada' && c.canc && c.canc.conf) {
-    if (!c.confirmada || !(c.credito > 0)) return [];
-    const base = baseVenda(c), conf = c.canc.conf;
+    if (!(c.confirmada || c.antecipada) || !(c.credito > 0)) return [];
+    const base = baseEquipe(c), conf = c.canc.conf;
     if (+sextaPagamento(base) > +sextaPagamento(conf)) return [];   // ainda não tinha sido paga: não paga
     const f = (c.canc.pct || 50) / 100, ev = [];
     partesVenda(c).partes.forEach(x => { ev.push({ pessoa: x.pessoa, papel: x.papel, data: base, valor: x.valor, tipo: 'com', cota: c });
@@ -245,9 +247,9 @@ function eventosEquipe(c) {
   }
   if (!valida(c)) return [];
   const ev = [];
-  if (!c.confirmada) return ev;   // Política: comissão só depois que a venda sai paga no relatório da Disal
+  if (!c.confirmada && !c.antecipada) return ev;   // Política: comissão só depois que a venda sai paga no relatório da Disal (ou antecipada pela loja)
   const { partes } = partesVenda(c);
-  partes.forEach(x => ev.push({ pessoa: x.pessoa, papel: x.papel, data: baseVenda(c), valor: x.valor, tipo: 'com', cota: c }));
+  partes.forEach(x => ev.push({ pessoa: x.pessoa, papel: x.papel, data: baseEquipe(c), valor: x.valor, tipo: 'com', cota: c }));
   // Estorno de 50% quando a 2ª não é paga (não vale para estorno por documento)
   if (c.p[2] === 'nao_pago' && !c.estornoDoc) {
     const d = addDays(venc(c, 2), 5), f = r('estorno_equipe') / 100;
@@ -597,7 +599,7 @@ function renderRanking() {
   }).join('');
 }
 /* ---------------- Minha comissão (extrato individual) ---------------- */
-const tipoLanc = e => e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : 'Venda');
+const tipoLanc = e => e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : e.cota && e.cota.antecipada ? 'Venda (antecipada pela loja)' : 'Venda');
 function renderMinha() {
   if (!ME || !$('mcSexta').value) return;
   if (veComissoes() && !$('mcPessoa').value) return;
@@ -611,7 +613,7 @@ function renderMinha() {
   const com = soma(daSexta.filter(e => e.valor > 0)), est = soma(daSexta.filter(e => e.valor < 0 && e.tipo !== 'desc')), dsc = soma(daSexta.filter(e => e.tipo === 'desc'));
   const ymS = ymOf(sexta), noMesPag = meus.filter(e => ymOf(sextaPagamento(e.data)) === ymS);
   const minhasPartes = c => partesVenda(c).partes.filter(x => x.pessoa === alvo.id).reduce((s, x) => s + x.valor, 0);
-  const aguard = COTAS.filter(c => valida(c) && !c.confirmada).map(c => ({ c, v: minhasPartes(c) })).filter(x => x.v > 0);
+  const aguard = COTAS.filter(c => valida(c) && !c.confirmada && !c.antecipada).map(c => ({ c, v: minhasPartes(c) })).filter(x => x.v > 0);
   const risco = alertasLista().map(c => ({ c, v: minhasPartes(c) * r('estorno_equipe') / 100 })).filter(x => x.v > 0);
   $('kpisMc').innerHTML =
     kpi(`A receber em ${fdate(sexta)}`, brl(Math.max(0, com + est + dsc), 2), com + est + dsc < 0 ? `<b class="neg">Saldo de ${brl(com + est + dsc, 2)} passa para a próxima sexta</b>` : `${daSexta.filter(e => e.tipo === 'com').length} lançamentos`) +

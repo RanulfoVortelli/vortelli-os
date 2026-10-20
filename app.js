@@ -392,7 +392,7 @@ function renderAlertas() {
   $('kpisAlert').innerHTML = kpi('Clientes no radar', L.length) + kpi('Vencidas sem baixa', `<span class="neg">${L.filter(c => stView(c, 2) === 'atrasado').length}</span>`) + kpi('Contatos feitos', L.filter(c => c.contato).length) + (GESTOR ? kpi('Dinheiro em risco', brl(L.reduce((s, c) => s + riscoCota(c), 0)), 'Estorno loja + equipe') : kpi('Seus clientes em risco', L.length));
   $('tbAlert').innerHTML = L.length ? L.map(c => `<tr><td class="n">${fdate(venc(c, 2))}</td><td>${esc(c.cliente)}</td><td class="n">${esc(c.telefone || '—')}</td><td>${esc(c.adm)}</td><td>${esc(c.vendedor)}</td><td class="r n">${brl(c.parcela, 2)}</td><td class="r n neg so-ceo">${brl(riscoCota(c))}</td>
     <td>${stView(c, 2) === 'atrasado' ? '<span class="chip c-atrasado">Vencida</span>' : '<span class="chip c-aberto">A vencer</span>'} ${c.contato ? '<span class="chip c-pago">Contato feito</span>' : ''}</td>
-    <td><div class="acts">${c.contato ? '' : `<button class="btn ghost sm" data-contato="${c.id}">Contato feito</button>`}${acaoPagou(c, 2)}${podeBaixar() ? `<button class="btn ghost sm" data-baixa="${c.id}:nao_pago">Não pagou</button>` : ''}</div></td></tr>`).join('')
+    <td><div class="acts">${c.contato ? '' : `<button class="btn ghost sm" data-contato="${c.id}">Contato feito</button>`}${acaoPagou(c, 2)}${podeAjustarVenc(c) ? `<button class="btn ghost sm" data-venc2="${c.id}">Ajustar vencimento</button>` : ''}${podeBaixar() ? `<button class="btn ghost sm" data-baixa="${c.id}:nao_pago">Não pagou</button>` : ''}</div></td></tr>`).join('')
     : `<tr><td colspan="9" class="empty">Nenhum cliente no radar.</td></tr>`;
 }
 
@@ -1543,7 +1543,7 @@ function renderCarteira() {
     return `<tr><td>${esc(c.cliente)}<span class="sub2">${esc(c.telefone || 'sem telefone')}${podeInformar() ? ` · <button type="button" class="linkbtn" style="font-size:11px" data-tel="${c.id}">editar</button>` : ''}</span></td><td class="n">${esc(c.contrato || '—')}</td><td class="n">${fdate(c.venda)}</td><td class="r n">${brl(c.credito)}</td>
       <td>${esc(c.vendedor)}<span class="sub2">adm: ${esc(c.adm)}</span></td>
       <td><span class="pp">${[1, 2, 3, 4, 5].map(k => { const s = stView(c, k); return `<i class="s-${s}" title="${k}ª: ${s} · venc. ${fdate(venc(c, k))}">${k}</i>`; }).join('')}</span></td>
-      <td class="n">${x.prox ? `${x.prox}ª · ${fdate(venc(c, x.prox))}` : '—'}<div class="acts" style="margin-top:4px">${x.prox && !c.canc ? acaoPagou(c, x.prox) : ''}${acaoCanc(c)}</div></td><td>${sitChip[situacaoCart(c)]}</td>
+      <td class="n">${x.prox ? `${x.prox}ª · ${fdate(venc(c, x.prox))}` : '—'}${x.prox === 2 && podeAjustarVenc(c) ? ` <button type="button" class="linkbtn" style="font-size:11px" data-venc2="${c.id}">ajustar</button>` : ''}<div class="acts" style="margin-top:4px">${x.prox && !c.canc ? acaoPagou(c, x.prox) : ''}${acaoCanc(c)}</div></td><td>${sitChip[situacaoCart(c)]}</td>
       <td class="r n">${x.recebido ? brl(x.recebido, 2) : '—'}</td><td class="r n">${x.previsto ? `<strong>${brl(x.previsto, 2)}</strong>` : '—'}${x.semBaixa ? `<span class="sub2">+ ${brl(x.semBaixa, 2)} vencida sem baixa</span>` : ''}</td><td class="r n ${x.risco ? 'neg' : ''}">${x.risco ? '−' + brl(x.risco, 2) : '—'}</td></tr>`; }).join('') +
     `<tr class="total"><td colspan="8">Total (${L.length} clientes)</td><td class="r n">${brl(soma(L, 'recebido'), 2)}</td><td class="r n">${brl(soma(L, 'previsto'), 2)}</td><td class="r n neg">${soma(L, 'risco') ? '−' + brl(soma(L, 'risco'), 2) : '—'}</td></tr>`
     : `<tr><td colspan="11" class="empty">Nenhum cliente neste filtro.</td></tr>`;
@@ -2054,6 +2054,24 @@ async function editarTelefone(c) {
   c.telefone = tel; toast(`Telefone de ${c.cliente.split(' ')[0]} atualizado`); renderAll();
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-tel]'); if (!b) return; const c = COTAS.find(x => x.id === +b.dataset.tel); if (c) editarTelefone(c); });
+// Ajustar o vencimento da 2ª (ex.: cliente que ainda vai para a assembleia e só paga no mês seguinte)
+const addMeses = (d, n) => { const x = new Date(d.getFullYear(), d.getMonth() + n, 1); x.setDate(Math.min(d.getDate(), new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate())); return x; };
+const podeAjustarVenc = c => podeInformar() && valida(c) && !['pago', 'nao_pago', 'cancelado'].includes(c.p[2]);
+async function ajustarVenc2(c) {
+  const atual = venc(c, 2), br = d => d.toLocaleDateString('pt-BR');
+  const v = prompt(`Novo vencimento da 2ª parcela de ${c.cliente} (dd/mm/aaaa).\nHoje está ${br(atual)}. A 3ª, 4ª e 5ª passam a vencer mês a mês depois dela.`, br(addMeses(atual, 1)));
+  if (v == null) return;
+  const m = v.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/); if (!m) return toast('Use o formato dd/mm/aaaa');
+  const d = new Date(+(m[3].length === 2 ? '20' + m[3] : m[3]), +m[2] - 1, +m[1]);
+  if (d.getDate() !== +m[1] || d.getMonth() !== +m[2] - 1) return toast('Data inválida');
+  const motivo = (prompt('Motivo do ajuste (ex.: vai participar da assembleia de novembro):', '') || '').trim();
+  if (!motivo) return toast('Ajuste não feito: informe o motivo');
+  const { error } = await sb.rpc('ajustar_venc2', { p_cota: c.id, p_data: iso(d), p_motivo: motivo });
+  if (error) return toast('Não foi possível ajustar: ' + error.message);
+  for (let k = 2; k <= 5; k++) if (!['pago', 'nao_pago', 'cancelado'].includes(c.p[k])) c.venc[k] = addMeses(d, k - 2);
+  toast(`A 2ª de ${c.cliente.split(' ')[0]} agora vence em ${br(d)}`); renderAll();
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-venc2]'); if (!b) return; const c = COTAS.find(x => x.id === +b.dataset.venc2); if (c) ajustarVenc2(c); });
 /* <<< TELEFONE <<< */
 iniciar();
 })();

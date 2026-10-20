@@ -146,12 +146,13 @@
       <div><span class="eyebrow">Carteira de clientes</span><h1 id="ctTitulo">Minha carteira</h1><p class="sub">Todos os seus clientes, o que você já recebeu e o que ainda vai receber se eles pagarem em dia. Administrativo e supervisor recebem na 3ª, 4ª e 5ª parcela; o supervisor, só nos clientes que ele mesmo vendeu e fechou.</p></div>
       <div class="toolbar" style="align-items:flex-end"><label for="ctPessoa" id="ctPessoaL" hidden>Pessoa<select id="ctPessoa"></select></label>
         <label for="ctFiltro">Mostrar<select id="ctFiltro"><option value="receber">Com valor a receber</option><option value="andamento">Em dia</option><option value="atrasada">Com parcela atrasada</option><option value="aguardando">Pagos aguardando Disal</option><option value="risco">Em risco na 2ª</option><option value="estornada">Estornadas</option><option value="concluida">Concluídas</option><option value="cancelamentos">Cancelamentos</option><option value="todas">Todos</option></select></label>
-        <label for="ctBusca">Buscar<input id="ctBusca" type="search" placeholder="Cliente ou contrato"></label></div>
+        <label for="ctBusca">Buscar<input id="ctBusca" type="search" placeholder="Cliente ou contrato"></label><button class="btn ghost" type="button" data-rp="abrir">Relatório 3ª, 4ª e 5ª</button></div>
     </div>
     <div class="kpis" id="kpisCt" style="margin-bottom:16px"></div>
     <div class="grid2" style="margin-bottom:16px;grid-template-columns:1fr">
       <div class="panel"><div class="panel-head"><h2>Previsão por mês</h2><span class="note">pela sexta em que cai o pagamento</span></div><div class="list" id="ctMeses"></div></div>
     </div>
+    <div class="panel" id="rpParc" hidden style="margin-bottom:16px"></div>
     <div id="ctMotivos"></div>
     <div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Contrato</th><th>Venda</th><th class="r">Crédito</th><th>Vendedor</th><th>Parcelas</th><th>Próxima</th><th>Situação</th><th class="r">Recebido</th><th class="r">Previsto</th><th class="r">Em risco</th></tr></thead><tbody id="tbCt"></tbody></table></div>
   </section>

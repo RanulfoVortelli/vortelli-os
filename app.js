@@ -1576,6 +1576,79 @@ const situacaoCart = c => {
   if ([2, 3, 4, 5].every(k => ['pago', 'cancelado'].includes(c.p[k]))) return 'concluida';
   return 'andamento';
 };
+// Relatório de parcelas (3ª, 4ª e 5ª) da carteira: pagas, não pagas, a vencer e canceladas, com PDF
+const ST_PARC = { paga: 'Paga', informada: 'Informada (aguardando Disal)', nao_paga: 'Não paga', a_vencer: 'A vencer', cancelada: 'Cancelada' };
+const RP = { aberto: false, parc: [3, 4, 5], st: Object.keys(ST_PARC) };
+function statusParc(c, k) {
+  if (c.status === 'cancelada' || c.p[k] === 'cancelado') return 'cancelada';
+  if (c.p[k] === 'pago') return 'paga';
+  if (c.p[k] === 'nao_pago') return 'nao_paga';
+  const s = stView(c, k); return s === 'informado' ? 'informada' : s === 'atrasado' ? 'nao_paga' : 'a_vencer';
+}
+function carteiraRelatorio(alvo) {
+  const f = alvo.funcao;
+  return COTAS.filter(c => c.credito > 0 && (f === 'administrativo' ? c.adm_id === alvo.id : f === 'gerente_adm' ? true :
+    f === 'gerente' ? (c.vendedor_id === alvo.id || c.fechador_id === alvo.id || (pessoaPorId(c.vendedor_id) || {}).equipe_id === alvo.equipe_id) :
+    (c.vendedor_id === alvo.id || c.fechador_id === alvo.id))).sort((a, b) => a.venda - b.venda);
+}
+const linhasRelParc = alvo => carteiraRelatorio(alvo).map(c => ({ c, s: { 3: statusParc(c, 3), 4: statusParc(c, 4), 5: statusParc(c, 5) } }))
+  .filter(x => RP.parc.some(k => RP.st.includes(x.s[k])));
+const alvoRel = () => podeVerTodasCarteiras() ? pessoaPorId($('ctPessoa').value) : ME;
+function renderRelParc() {
+  const el = $('rpParc'); if (!el) return; el.hidden = !RP.aberto; if (!RP.aberto) return;
+  const alvo = alvoRel(); if (!alvo) return;
+  const todas = carteiraRelatorio(alvo), L = linhasRelParc(alvo);
+  const chip = { paga: 'c-pago', informada: 'c-inf', nao_paga: 'c-atrasado', a_vencer: 'c-aberto', cancelada: 'c-canc' };
+  const cont = k => Object.keys(ST_PARC).map(s => `${ST_PARC[s]}: <b>${todas.filter(c => statusParc(c, k) === s).length}</b>`).join(' · ');
+  const cel = (x, k) => `<td><span class="chip ${chip[x.s[k]]}">${ST_PARC[x.s[k]].replace(' (aguardando Disal)', '')}</span><span class="sub2">venc. ${fdate(venc(x.c, k))}</span></td>`;
+  const caixa = (attr, v, txt, on) => `<label style="display:inline-flex;flex-direction:row;align-items:center;gap:4px;margin-right:12px;font-size:13px"><input type="checkbox" ${attr}="${v}" ${on ? 'checked' : ''} style="width:auto"> ${txt}</label>`;
+  el.innerHTML = `<div class="panel-head"><h2>Relatório de parcelas · ${esc(alvo.nome)}</h2><div class="acts"><button class="btn gold sm" type="button" data-rp="pdf">Gerar PDF</button><button class="btn ghost sm" type="button" data-rp="fechar">Fechar</button></div></div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;margin:8px 0">
+      <div><div class="note" style="margin-bottom:4px">Parcelas</div>${[3, 4, 5].map(k => caixa('data-rpk', k, k + 'ª', RP.parc.includes(k))).join('')}</div>
+      <div><div class="note" style="margin-bottom:4px">Situação</div>${Object.keys(ST_PARC).map(s => caixa('data-rps', s, ST_PARC[s], RP.st.includes(s))).join('')}</div>
+    </div>
+    <p class="note">${todas.length} clientes na carteira (incluindo cancelados) · mostrando ${L.length}<br>${[3, 4, 5].map(k => `<b>${k}ª parcela</b> — ${cont(k)}`).join('<br>')}</p>
+    <div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Contrato</th><th>Venda</th><th class="r">Crédito</th><th>Vendedor / fechador</th><th>Adm</th>${RP.parc.map(k => `<th>${k}ª parcela</th>`).join('')}</tr></thead><tbody>
+    ${L.map(x => `<tr><td>${esc(x.c.cliente)}${x.c.status === 'cancelada' ? '<span class="sub2">venda cancelada</span>' : ''}</td><td class="n">${esc(x.c.contrato || '—')}</td><td class="n">${fdate(x.c.venda)}</td><td class="r n">${brl(x.c.credito)}</td><td>${esc(x.c.vendedor)}<span class="sub2">${esc(x.c.fechador)}</span></td><td>${esc(x.c.adm)}</td>${RP.parc.map(k => cel(x, k)).join('')}</tr>`).join('') || `<tr><td colspan="9" class="empty">Nenhum cliente com esses filtros.</td></tr>`}
+    </tbody></table></div>`;
+}
+async function gerarPdfParcelas() {
+  try { await carregarScript(LIB_PDF, 'jspdf'); await carregarScript(LIB_PDFT); } catch (e) { return toast('Erro: ' + e.message); }
+  const alvo = alvoRel(); if (!alvo) return;
+  const L = linhasRelParc(alvo), todas = carteiraRelatorio(alvo);
+  const t = s => String(s == null || s === '' ? '-' : s).replace(/—/g, '-').replace(/ /g, ' ');
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+  doc.setFillColor(15, 37, 71); doc.rect(0, 0, 297, 26, 'F');
+  doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
+  doc.text(t(`Relatório de parcelas (3ª, 4ª e 5ª) - ${alvo.nome}`), 14, 12);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text(t(`Parcelas: ${RP.parc.map(k => k + 'ª').join(', ')} | Situação: ${RP.st.map(s => ST_PARC[s]).join(', ')} | ${L.length} de ${todas.length} clientes`), 14, 20);
+  doc.setTextColor(13, 26, 48);
+  doc.autoTable({ startY: 31, head: [['Parcela', ...Object.values(ST_PARC)]], body: [3, 4, 5].map(k => [k + 'ª', ...Object.keys(ST_PARC).map(s => String(todas.filter(c => statusParc(c, k) === s).length))]),
+    styles: { fontSize: 8, cellPadding: 1.5 }, headStyles: { fillColor: [15, 37, 71] }, tableWidth: 200 });
+  const cor = { paga: [214, 238, 220], informada: [222, 232, 248], nao_paga: [248, 220, 216], a_vencer: [244, 244, 244], cancelada: [226, 226, 226] };
+  doc.autoTable({ startY: doc.lastAutoTable.finalY + 6,
+    head: [['Cliente', 'Contrato', 'Venda', 'Crédito', 'Vendedor', 'Fechador', 'Adm', ...RP.parc.map(k => k + 'ª parcela')]],
+    body: L.map(x => [t(x.c.cliente + (x.c.status === 'cancelada' ? ' (venda cancelada)' : '')), t(x.c.contrato), x.c.venda.toLocaleDateString('pt-BR'), t(brl(x.c.credito)), t(x.c.vendedor), t(x.c.fechador), t(x.c.adm),
+      ...RP.parc.map(k => `${ST_PARC[x.s[k]].replace(' (aguardando Disal)', '')}\nvenc. ${venc(x.c, k).toLocaleDateString('pt-BR')}`)]),
+    styles: { fontSize: 7.5, cellPadding: 1.4 }, headStyles: { fillColor: [15, 37, 71] }, columnStyles: { 3: { halign: 'right' } },
+    didParseCell: d => { if (d.section === 'body' && d.column.index >= 7) { const x = L[d.row.index], k = RP.parc[d.column.index - 7]; if (x && k) d.cell.styles.fillColor = cor[x.s[k]]; } } });
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(90, 105, 132); doc.text(t(`Gerado em ${new Date().toLocaleString('pt-BR')} pelo Vortelli OS | página ${i} de ${n}`), 14, 203); }
+  doc.save(`Parcelas_3a_5a_${alvo.nome.replace(/\s+/g, '_')}_${iso(TODAY)}.pdf`);
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-rp]'); if (!b) return;
+  if (b.dataset.rp === 'abrir') { RP.aberto = true; renderRelParc(); $('rpParc').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  else if (b.dataset.rp === 'fechar') { RP.aberto = false; renderRelParc(); }
+  else if (b.dataset.rp === 'pdf') gerarPdfParcelas();
+});
+document.addEventListener('change', e => {
+  const x = e.target;
+  if (x.id === 'ctPessoa') renderRelParc();
+  else if (x.dataset && x.dataset.rpk) { const k = +x.dataset.rpk; RP.parc = x.checked ? [...new Set([...RP.parc, k])].sort() : RP.parc.filter(v => v !== k); renderRelParc(); }
+  else if (x.dataset && x.dataset.rps) { const s = x.dataset.rps; RP.st = x.checked ? [...new Set([...RP.st, s])] : RP.st.filter(v => v !== s); renderRelParc(); }
+});
 function renderCarteira() {
   if (!ME || !$('ctFiltro')) return;
   const todas = podeVerTodasCarteiras();

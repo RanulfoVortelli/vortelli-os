@@ -136,6 +136,7 @@ async function carregar(user) {
     await carregarTrafego();
     await carregarCanc();
     await carregarDebitos();
+    await carregarCaixa();
     $('login').hidden = true; $('app').hidden = false;
     $('quem').textContent = `${ME.nome} · ${funcaoNome(ME)}`;
     document.querySelectorAll('[data-gestor]').forEach(b => b.hidden = !GESTOR);
@@ -395,6 +396,55 @@ function renderAlertas() {
     : `<tr><td colspan="9" class="empty">Nenhum cliente no radar.</td></tr>`;
 }
 
+// Caixa da loja: saldo do banco informado pelo CEO + movimento estimado desde então
+let CAIXA = [];
+async function carregarCaixa() {
+  if (!GESTOR) return;
+  const { data, error } = await sb.from('caixa_saldos').select('*').order('data', { ascending: false }).order('criado_em', { ascending: false }).limit(20);
+  if (!error) CAIXA = (data || []).map(x => ({ ...x, data: parseD(x.data), valor: Number(x.valor) }));
+}
+function movimentoCaixa(de) {   // do dia seguinte ao saldo informado até hoje
+  const dentro = d => d > de && d <= TODAY;
+  let entrada = 0, disal = 0;
+  COTAS.forEach(c => eventosLoja(c).forEach(e => { if (e.previsto || !dentro(e.data)) return; if (e.tipo === 'disal') disal += e.valor; else entrada += e.valor; }));
+  const imp = Math.max(0, disal) * r('imposto') / 100;
+  const porSexta = {};
+  todosEventosEquipe().forEach(e => { const s = sextaPagamento(e.data); if (!dentro(s)) return; const p = (porSexta[+s] ||= {}); p[e.pessoa] = (p[e.pessoa] || 0) + e.valor; });
+  const equipe = Object.values(porSexta).reduce((s, p) => s + Object.values(p).reduce((a, v) => a + Math.max(0, v), 0), 0);
+  let folha = 0;
+  for (let d = addDays(de, 1); d <= TODAY; d = addDays(d, 1)) if (diasFolha().includes(d.getDate())) folha += folhaTotal() / 2;
+  const lanc = LANC.filter(l => dentro(l.data)).reduce((s, l) => s + (l.tipo === 'saida' ? -l.valor : l.valor), 0);
+  return { entrada, disal: disal - imp, equipe: -equipe, folha: -folha, lanc };
+}
+function renderCaixa() {
+  const el = $('caixaPanel'); if (!el || !GESTOR) return;
+  const ult = CAIXA[0];
+  const form = `<form id="formCaixa" class="formgrid" style="margin-top:12px"><label for="cxData">Data do saldo<input id="cxData" type="date" required value="${iso(TODAY)}"></label><label for="cxValor">Saldo no banco (R$)<input id="cxValor" type="number" step="0.01" required placeholder="0,00"></label><label for="cxObs">Observação<input id="cxObs" placeholder="Ex.: soma das contas da loja"></label><div style="align-self:end"><button class="btn gold" type="submit">Registrar saldo</button></div></form>`;
+  if (!ult) { el.innerHTML = `<div class="panel-head"><h2>Caixa da loja</h2></div><p class="note">O sistema ainda não sabe quanto tem no banco. Informe o saldo real de hoje (somando as contas da loja). A partir dele, o caixa passa a ser atualizado com as entradas das vendas, a Disal, as comissões pagas, os salários e os lançamentos abaixo.</p>${form}`; return; }
+  const m = movimentoCaixa(ult.data), mov = m.entrada + m.disal + m.equipe + m.folha + m.lanc, est = ult.valor + mov;
+  const linhas = [['Sobra das entradas', m.entrada], ['Comissão Disal (líquida de imposto)', m.disal], ['Comissões pagas à equipe (sextas)', m.equipe], ['Salários', m.folha], ['Lançamentos do Financeiro', m.lanc]];
+  el.innerHTML = `<div class="panel-head"><h2>Caixa da loja</h2><span class="sub">estimado a partir do último saldo do banco</span></div>
+    <div class="kpis" style="margin:8px 0 12px">${kpi('Saldo informado', brl(ult.valor, 2), `fim do dia ${fdate(ult.data)}${ult.obs ? ' · ' + esc(ult.obs) : ''}`)}${kpi('Movimento desde então', `<span class="${mov < 0 ? 'neg' : ''}">${brl(mov, 2)}</span>`, 'pelo que está no sistema')}${kpi('Caixa estimado hoje', `<span class="${est < 0 ? 'neg' : ''}">${brl(est, 2)}</span>`, 'confira com o banco de vez em quando')}</div>
+    <div class="list">${linhas.map(([t, v]) => `<div class="row"><div class="l">${t}</div><b class="${v < 0 ? 'neg' : ''}">${brl(v, 2)}</b></div>`).join('')}</div>
+    <details style="margin-top:10px"><summary class="note" style="cursor:pointer">Informar novo saldo do banco · histórico</summary>${form}<div class="list" style="margin-top:10px">${CAIXA.map(x => `<div class="row"><div class="l">${fdate(x.data)}<span>${esc(x.obs || '')}${x.obs ? ' · ' : ''}${esc(nomeP(x.criado_por))}</span></div><b>${brl(x.valor, 2)}</b> <button class="btn ghost sm" type="button" data-cxdel="${x.id}">Excluir</button></div>`).join('')}</div></details>`;
+}
+document.addEventListener('submit', async ev => {
+  if (ev.target.id !== 'formCaixa') return; ev.preventDefault();
+  const data = $('cxData').value, txt = $('cxValor').value;
+  if (!data || txt === '') return toast('Informe a data e o saldo');
+  if (parseD(data) > TODAY) return toast('A data não pode ser no futuro');
+  const { error } = await sb.from('caixa_saldos').insert({ data, valor: +txt, obs: $('cxObs').value.trim() || null, criado_por: ME.id });
+  if (error) return toast('Não foi possível salvar: ' + error.message);
+  toast('Saldo do banco registrado'); await carregarCaixa(); renderCaixa();
+});
+document.addEventListener('click', async e => {
+  const t = e.target.closest('[data-cxdel]'); if (!t) return;
+  if (!confirm('Excluir esse saldo informado?')) return;
+  const { error } = await sb.from('caixa_saldos').delete().eq('id', t.dataset.cxdel);
+  if (error) return toast('Não foi possível excluir: ' + error.message);
+  await carregarCaixa(); renderCaixa();
+});
+
 function renderFin() {
   if (!GESTOR) return;
   const byDay = {};
@@ -412,6 +462,7 @@ function renderFin() {
   const traf = man.filter(l => l.cat === 'Tráfego pago').reduce((s, l) => s + l.valor, 0);
   const vendas = COTAS.filter(c => valida(c) && noMes(c.venda, ymNow)).length;
   $('kpisFin').innerHTML = kpi('Entradas no mês', brl(ent)) + kpi('Saídas no mês', `<span class="neg">${brl(sai)}</span>`) + kpi('Saldo', brl(ent - sai)) + kpi('Tráfego por cota', vendas && traf ? brl(traf / vendas) : '—', `${brl(traf)} em tráfego`);
+  renderCaixa();
   $('tbFin').innerHTML = todos.length ? todos.map(x => `<tr><td class="n">${fdate(x.data)}</td><td>${esc(x.cat)}</td><td>${esc(x.desc)}</td><td>${x.origem === 'Automático' ? '<span class="chip c-aberto">Automático</span>' : '<span class="chip c-pago">Lançado</span>'}</td><td class="r n ${x.sinal < 0 ? 'neg' : ''}">${brl(x.sinal * x.valor, 2)}</td></tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhum lançamento neste mês.</td></tr>`;
 }
 
@@ -690,6 +741,8 @@ $('formCota').addEventListener('submit', async ev => {
   if (cpf && cpf.length !== 11) return toast('CPF precisa ter 11 números');
   const contrato = $('fContrato').value.trim() || null;
   if (contrato && COTAS.some(c => c.contrato === contrato && c.id !== id)) return toast('Esse contrato já está cadastrado em outra cota');
+  const parc1 = +$('fParc').value || 0;
+  if (parc1 > r('entrada')) return toast(`A 1ª parcela (${brl(parc1, 2)}) está maior que a entrada (${brl(r('entrada'))}). Confira a vírgula: o certo é algo como 1309,62.`);
   const row = {
     cliente: $('fCliente').value.trim(), cpf: cpf || null, telefone: $('fTel').value.trim() || null, credito: +$('fCredito').value, parcela_valor: +$('fParc').value || null,
     data_venda: $('fData').value, vencimento_1: $('fVenc').value || $('fData').value, contrato, grupo: $('fGrupo').value.trim() || null, cota: $('fCotaN').value.trim() || null,

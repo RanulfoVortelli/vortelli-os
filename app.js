@@ -214,7 +214,7 @@ function eventosLoja(c) {
   const ev = [{ data: c.venda, tipo: 'entrada', valor: r('entrada') - c.parcela },
               { data: baseVenda(c), tipo: 'disal', valor: c.credito * r('disal_venda') / 100, previsto: !c.confirmada }];
   for (let k = 3; k <= 5; k++) {
-    if (c.p[k] === 'pago') ev.push({ data: dataParcela(c, k), tipo: 'disal', valor: c.credito * r('disal_p345') / 100 });
+    if (c.p[k] === 'pago') ev.push({ data: dataParcela(c, k), tipo: 'disal', valor: c.credito * r('disal_p345') / 100, previsto: aguardaBordero(c, k) });
     else if (c.p[k] === 'aberto') ev.push({ data: venc(c, k), tipo: 'disal', valor: c.credito * r('disal_p345') / 100, previsto: true });
   }
   if (c.p[2] === 'nao_pago') ev.push({ data: addDays(venc(c, 2), 5), tipo: 'disal', valor: -c.credito * r(c.estornoDoc ? 'estorno_doc' : 'estorno_disal') / 100 });
@@ -253,6 +253,10 @@ function partesVenda(c) {
 // Recorrência do supervisor (regra de 16/10/2026): 3ª, 4ª e 5ª pagas, só nos clientes que ele mesmo vendeu e fechou,
 // no mesmo percentual do administrativo. Vale para parcelas pagas a partir da semana de 12/10/2026 (sexta 23/10).
 const SUP_REC_DESDE = new Date(2026, 9, 12);
+// Regra (20/10/2026): a comissão de 3ª, 4ª e 5ª parcela só é lançada quando a parcela vem num borderô da Disal.
+// Parcela baixada à mão sem borderô fica "paga, aguardando borderô". Vale a partir da sexta 23/10; as sextas anteriores ficam como foram pagas.
+const RECOR_BORDERO_DESDE = new Date(2026, 9, 23);
+const aguardaBordero = (c, k) => c.p[k] === 'pago' && !(c.disalEm && c.disalEm[k]) && +sextaPagamento(venc(c, k)) >= +RECOR_BORDERO_DESDE;
 const supPct = () => (R.sup_parcela ? r('sup_parcela') : r('adm_parcela'));
 const supRecorrente = c => { const pv = pessoaPorId(c.vendedor_id), pf = pessoaPorId(c.fechador_id), q = pv || pf;
   return q && q.funcao === 'gerente' && (!pv || !pf || pv.id === pf.id) ? q : null; };
@@ -292,7 +296,7 @@ function eventosEquipe(c) {
   // Administrativo e gerente administrativo: 0,05% por 3ª, 4ª e 5ª parcela paga
   const gerAdm = PESSOAS.filter(p => p.funcao === 'gerente_adm' && p.ativo);
   for (let k = 3; k <= 5; k++) {
-    if (c.p[k] !== 'pago') continue;
+    if (c.p[k] !== 'pago' || aguardaBordero(c, k)) continue;   // sem borderô, sem comissão
     const d = dataParcela(c, k);
     if (c.adm_id) ev.push({ pessoa: c.adm_id, papel: 'Administrativo', data: d, valor: c.credito * r('adm_parcela') / 100, tipo: 'com', cota: c });
     gerAdm.forEach(g => ev.push({ pessoa: g.id, papel: 'Gerente adm', data: d, valor: c.credito * r('gerente_adm_parcela') / 100, tipo: 'com', cota: c }));
@@ -989,7 +993,8 @@ function conferir(rel) {
     }
     g.parcelas.forEach(k => {
       if (['cancelada'].includes(c.status)) return g.alertas.push({ tipo: 'parcela_cancelada', txt: `Disal pagou a ${k}ª parcela de uma venda cancelada no sistema.` });
-      if (c.p[k] === 'pago') g.infos.push(`${k}ª já baixada`);
+      if (c.p[k] === 'pago' && !aguardaBordero(c, k)) g.infos.push(`${k}ª já baixada`);
+      else if (c.p[k] === 'pago') g.acoes.push({ tipo: 'baixa', k, txt: `Registrar o pagamento da Disal na ${k}ª (já estava baixada): libera a comissão` });
       else g.acoes.push({ tipo: 'baixa', k, txt: `Dar baixa na ${k}ª parcela${c.adm_id ? '' : ' (sem administrativo na carteira)'}` });
     });
     if (g.estorno < 0) {

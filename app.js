@@ -810,7 +810,8 @@ $('formCota').addEventListener('submit', async ev => {
   const cred1 = numValor($('fCredito').value), parc1 = numValor($('fParc').value) || 0;
   if (!(cred1 >= 10000)) return toast('Confira o crédito: digite assim, 120.000');
   if (Number.isNaN(parc1) || parc1 < 0) return toast('Confira a 1ª parcela: digite assim, 1.488,21');
-  if (parc1 > r('entrada')) return toast(`A 1ª parcela (${brl(parc1, 2)}) está maior que a entrada (${brl(r('entrada'))}). Confira a vírgula: o certo é algo como 1309,62.`);
+  const limParc = r('entrada') || 3600;   // a regra da entrada só é visível para o CEO; para os demais vale o padrão de R$ 3.600
+  if (parc1 > limParc) return toast(`A 1ª parcela (${brl(parc1, 2)}) está maior que a entrada (${brl(limParc)}). Confira a vírgula: o certo é algo como 1.309,62.`);
   const row = {
     cliente: $('fCliente').value.trim(), cpf: cpf || null, telefone: $('fTel').value.trim() || null, credito: cred1, parcela_valor: parc1 || null,
     data_venda: $('fData').value, vencimento_1: $('fVenc').value || $('fData').value, contrato, grupo: $('fGrupo').value.trim() || null, cota: $('fCotaN').value.trim() || null,

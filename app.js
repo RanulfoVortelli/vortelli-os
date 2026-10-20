@@ -258,14 +258,14 @@ const supRecorrente = c => { const pv = pessoaPorId(c.vendedor_id), pf = pessoaP
   return q && q.funcao === 'gerente' && (!pv || !pf || pv.id === pf.id) ? q : null; };
 const ativoEm = (id, d) => { const p = pessoaPorId(id); return !(p && p.data_saida && d >= parseD(p.data_saida)); };
 function eventosEquipe(c) {
-  // Cancelamento confirmado pelo extrato da Disal: se a comissão já tinha sido paga, devolve 100% (até 7 dias da venda) ou 50%
+  // Cancelamento confirmado pelo extrato da Disal: se a comissão já tinha sido paga, devolve 100% (até 7 dias da venda ou acordo de devolução) ou 50%
   if (c.status === 'cancelada' && c.canc && c.canc.conf) {
     if (!(c.confirmada || c.antecipada) || !(c.credito > 0)) return [];
     const base = baseEquipe(c), conf = c.canc.conf;
     if (+sextaPagamento(base) > +sextaPagamento(conf)) return [];   // ainda não tinha sido paga: não paga
     const f = (c.canc.pct || 50) / 100, ev = [];
     partesVenda(c).partes.forEach(x => { ev.push({ pessoa: x.pessoa, papel: x.papel, data: base, valor: x.valor, tipo: 'com', cota: c });
-      ev.push({ pessoa: x.pessoa, papel: x.papel, data: conf, valor: -x.valor * f, tipo: 'est', cota: c }); });
+      ev.push({ pessoa: x.pessoa, papel: x.papel, data: conf, valor: -x.valor * f, tipo: 'est', cota: c, pctc: c.canc.pct || 50 }); });
     bonusCampanha(c).forEach(b => { ev.push(b); ev.push({ ...b, data: conf, valor: -b.valor, tipo: 'est' }); });   // bônus de campanha: estorno de 100%
     return ev.filter(e => ativoEm(e.pessoa, e.data));
   }
@@ -666,7 +666,7 @@ function renderRanking() {
   }).join('');
 }
 /* ---------------- Minha comissão (extrato individual) ---------------- */
-const tipoLanc = e => e.tipo === 'bon' ? `Bônus de premiação: ${esc(e.camp)}` : e.camp && e.tipo === 'est' ? `Estorno do bônus (100%): ${esc(e.camp)}` : e.camp && e.tipo === 'rec' ? `Bônus devolvido (cliente recuperado): ${esc(e.camp)}` : e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : e.cota && e.cota.antecipada ? 'Venda (antecipada pela loja)' : 'Venda');
+const tipoLanc = e => e.tipo === 'bon' ? `Bônus de premiação: ${esc(e.camp)}` : e.camp && e.tipo === 'est' ? `Estorno do bônus (100%): ${esc(e.camp)}` : e.camp && e.tipo === 'rec' ? `Bônus devolvido (cliente recuperado): ${esc(e.camp)}` : e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? (e.pctc ? `Estorno por cancelamento (${e.pctc}%)` : 'Estorno (2ª não paga)') : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : e.cota && e.cota.antecipada ? 'Venda (antecipada pela loja)' : 'Venda');
 function renderMinha() {
   if (!ME || !$('mcSexta').value) return;
   if (veComissoes() && !$('mcPessoa').value) return;
@@ -1758,7 +1758,7 @@ document.addEventListener('click', e => {
 /* >>> CANCELAMENTO >>> */
 // Pedido de cancelamento (motivo + contrato assinado) e confirmação pelo extrato da Disal (lido automaticamente).
 const MOTIVOS_CANC = ['Desistência / arrependimento', 'Condição financeira', 'Não entendeu o plano', 'Promessa diferente do contratado',
-  'Insatisfação com o atendimento', 'Comprou em outro lugar', 'Demora na contemplação', 'Outro'];
+  'Insatisfação com o atendimento', 'Comprou em outro lugar', 'Demora na contemplação', 'Acordo de devolução', 'Outro'];
 async function carregarCanc() {
   const { data } = await sb.from('cancelamentos').select('*');
   (data || []).forEach(k => { const c = COTAS.find(x => x.id === k.cota_id); if (c) c.canc = {
@@ -1942,7 +1942,7 @@ async function confirmarCanc() {
   if (error) { $('cfSalvar').disabled = false; return ($('cfErro').textContent = 'Não foi possível confirmar: ' + error.message); }
   Object.assign(c.canc, { conf: TODAY, pct: data, ext: up.path });
   c.status = 'cancelada'; [2, 3, 4, 5].forEach(k => { if (c.p[k] === 'aberto') c.p[k] = 'cancelado'; });
-  $('dlgCancConf').close(); toast(`Cancelamento de ${c.cliente.split(' ')[0]} confirmado pela Disal. Equipe devolve ${data}% da comissão.`); renderAll();
+  $('dlgCancConf').close(); toast(`Cancelamento de ${c.cliente.split(' ')[0]} confirmado pela Disal. Equipe devolve ${c.canc && c.canc.motivo === 'Acordo de devolução' ? 100 : data}% da comissão.`); renderAll();
 }
 async function verArquivo(path) {
   const { data, error } = await sb.storage.from('comprovantes').createSignedUrl(path, 300);

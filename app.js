@@ -693,7 +693,7 @@ function renderMinha() {
     kpi('Aguardando a Disal', brl(aguard.reduce((s, x) => s + x.v, 0), 2), `${aguard.length} ${aguard.length === 1 ? 'venda' : 'vendas'} ainda sem confirmação`);
   $('tbMc').innerHTML = daSexta.length ? daSexta.map(e => {
     const c = e.cota || {}; const gg = String(c.id || '').startsWith('gg');
-    return `<tr><td class="n">${fdate(e.data)}</td><td>${gg ? 'Loja: meta de cotas do mês' : esc(c.cliente || '—')}</td><td class="n">${esc(c.contrato || '—')}</td><td>${esc(e.papel)}</td><td>${tipoLanc(e)}</td><td class="r n">${c.credito ? brl(c.credito) : '—'}</td><td class="r n ${e.valor < 0 ? 'neg' : ''}"><strong>${brl(e.valor, 2)}</strong></td></tr>`;
+    return `<tr><td class="n">${fdate(e.data)}</td><td>${gg ? 'Loja: meta de cotas do mês' : esc(c.cliente || '—')}${c.obs ? `<span class="sub2">${esc(c.obs)}</span>` : ''}</td><td class="n">${esc(c.contrato || '—')}</td><td>${esc(e.papel)}</td><td>${tipoLanc(e)}</td><td class="r n">${c.credito ? brl(c.credito) : '—'}</td><td class="r n ${e.valor < 0 ? 'neg' : ''}"><strong>${brl(e.valor, 2)}</strong></td></tr>`;
   }).join('') + `<tr class="total"><td colspan="6">Total da sexta</td><td class="r n">${brl(com + est + dsc, 2)}</td></tr>`
     : `<tr><td colspan="7" class="empty">Nada a receber nesta sexta.</td></tr>`;
   $('mcRisco').innerHTML = risco.length ? risco.map(({ c, v }) => `<div class="row"><div class="l">${esc(c.cliente)}<span>2ª vence ${fdate(venc(c, 2))} · ${esc(c.telefone || 'sem telefone')}${stView(c, 2) === 'atrasado' ? ' · <b class="neg">vencida</b>' : ''}</span></div><b class="neg">−${brl(v, 2)}</b></div>`).join('') : '<p class="note">Nenhum cliente seu em risco agora.</p>';
@@ -2028,7 +2028,8 @@ function aplicarConta(base) {
       const desconta = (d, v, txt) => {
         v = r2(Math.min(v, rest[d.id])); if (!(v > 0)) return;
         rest[d.id] = r2(rest[d.id] - v); net -= v;
-        extra.push({ pessoa: pid, papel: 'Débito', data: seg, valor: -v, tipo: 'desc', cota: { id: `db${d.id}-${s}`, cliente: txt } });
+        extra.push({ pessoa: pid, papel: 'Débito', data: seg, valor: -v, tipo: 'desc', cota: { id: `db${d.id}-${s}`, cliente: txt,
+          obs: [d.obs, `${formaTxt(d)} · total ${brl(d.valor_total, 2)}`, d.criado_por ? `lançado por ${nomeP(d.criado_por)}${d.criado_em ? ' em ' + new Date(d.criado_em).toLocaleDateString('pt-BR') : ''}` : ''].filter(Boolean).join(' · ') } });
         const C = CONTA[d.id]; C.linhas.push({ s: S, v }); if (s <= agora) C.descontado += v; else { C.previsto += v; if (!C.prox) C.prox = { s: S, v }; }
         if (rest[d.id] <= 0) C.fim = S;
       };
@@ -2188,7 +2189,8 @@ function meusDebitosHtml(pid) {
   const l = DEB.filter(d => d.pessoa_id === pid && d.status === 'ativo');
   if (!l.length) return '<p class="note">Nenhum débito em aberto.</p>';
   return l.map(d => { const C = CONTA[d.id] || {}, falta = restanteDeb(d);
-    return `<div class="row"><div class="l">${esc(d.descricao)}<span>${formaTxt(d)} · total ${brl(d.valor_total, 2)} · já descontado ${brl(r2((C.descontado || 0) + (C.fora || 0)), 2)}${C.prox ? ` · ${C.prox.direto ? 'próximo vencimento' : 'próxima sexta'}: ${fdate(C.prox.s)} (${brl(C.prox.v, 2)})` : ''}${vencidasDireto(d).length ? ' · <b class="neg">parcela vencida</b>' : ''}</span></div><b class="${falta > 0 ? 'neg' : ''}">${falta > 0 ? 'falta ' + brl(falta, 2) : 'quitado'}</b></div>`; }).join('');
+    const info = [d.obs ? 'Obs.: ' + d.obs : '', d.criado_por ? `Lançado por ${nomeP(d.criado_por)}${d.criado_em ? ' em ' + new Date(d.criado_em).toLocaleDateString('pt-BR') : ''}` : ''].filter(Boolean).join(' · ');
+    return `<div class="row"><div class="l">${esc(d.descricao)}${info ? `<span>${esc(info)}</span>` : ''}<span>${formaTxt(d)} · total ${brl(d.valor_total, 2)} · já descontado ${brl(r2((C.descontado || 0) + (C.fora || 0)), 2)}${C.prox ? ` · ${C.prox.direto ? 'próximo vencimento' : 'próxima sexta'}: ${fdate(C.prox.s)} (${brl(C.prox.v, 2)})` : ''}${vencidasDireto(d).length ? ' · <b class="neg">parcela vencida</b>' : ''}</span></div><b class="${falta > 0 ? 'neg' : ''}">${falta > 0 ? 'falta ' + brl(falta, 2) : 'quitado'}</b></div>`; }).join('');
 }
 /* <<< DEBITOS <<< */
 /* >>> TELEFONE >>> */

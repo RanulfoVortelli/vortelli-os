@@ -258,6 +258,7 @@ function eventosEquipe(c) {
     const f = (c.canc.pct || 50) / 100, ev = [];
     partesVenda(c).partes.forEach(x => { ev.push({ pessoa: x.pessoa, papel: x.papel, data: base, valor: x.valor, tipo: 'com', cota: c });
       ev.push({ pessoa: x.pessoa, papel: x.papel, data: conf, valor: -x.valor * f, tipo: 'est', cota: c }); });
+    bonusCampanha(c).forEach(b => { ev.push(b); ev.push({ ...b, data: conf, valor: -b.valor, tipo: 'est' }); });   // bônus de campanha: estorno de 100%
     return ev.filter(e => ativoEm(e.pessoa, e.data));
   }
   if (!valida(c)) return [];
@@ -274,6 +275,10 @@ function eventosEquipe(c) {
       if (x.papel === 'Gerente' && !vendedorRecebeu) return;
       ev.push({ pessoa: x.pessoa, papel: x.papel, data: d, valor: -x.valor * f, tipo: 'est', cota: c });
       if (c.recuperacao) ev.push({ pessoa: x.pessoa, papel: x.papel, data: semanaDisal(c.recuperacao), valor: x.valor * f, tipo: 'rec', cota: c });   // recuperação paga na semana do borderô
+    });
+    bonusCampanha(c).forEach(b => {   // bônus de campanha: estorno de 100% (volta se o cliente for recuperado)
+      ev.push({ ...b, data: d, valor: -b.valor, tipo: 'est' });
+      if (c.recuperacao) ev.push({ ...b, data: semanaDisal(c.recuperacao), valor: b.valor, tipo: 'rec' });
     });
   }
   // Administrativo e gerente administrativo: 0,05% por 3ª, 4ª e 5ª parcela paga
@@ -394,7 +399,7 @@ function renderCampanhas() {
   const cotasDe = k => COTAS.filter(c => valida(c) && c.venda >= k.ini && c.venda <= k.fim);
   const totalDe = k => cotasDe(k).reduce((s, c) => s + bonusCampanha(c, [k]).filter(e => ativoEm(e.pessoa, e.data)).reduce((a, e) => a + e.valor, 0), 0);
   el.innerHTML = `<div class="panel-head"><h2>Campanhas de premiação</h2><button class="btn gold sm" type="button" data-camp="nova">+ Nova campanha</button></div>
-    <p class="note" style="margin:4px 0 10px">Bônus fixo por cota vendida no período. Entra no relatório de cada um como "Bônus de premiação", na mesma sexta da comissão da venda. Venda cancelada não paga bônus.</p>
+    <p class="note" style="margin:4px 0 10px">Bônus fixo por cota vendida no período. Entra no relatório de cada um como "Bônus de premiação", na mesma sexta da comissão da venda. Se a venda for cancelada ou o cliente não pagar a 2ª parcela, o bônus é estornado 100%.</p>
     <div class="list">${CAMP.map(k => { const n = cotasDe(k).length; return `<div class="row"><div class="l">${esc(k.nome)}<span>${fdate(k.ini)}${+k.fim !== +k.ini ? ' a ' + fdate(k.fim) : ''} · vendedor ${brl(k.vv, 2)} · fechador ${brl(k.vf, 2)}${k.ambos ? '' : ' · quem vende e fecha sozinho recebe só o do vendedor'} · ${n} ${n === 1 ? 'cota' : 'cotas'}${k.ativa ? '' : ' · <b>desativada</b>'}</span></div><b>${brl(k.ativa ? totalDe(k) : 0, 2)}</b> <button class="btn ghost sm" type="button" data-camp="editar:${k.id}">Editar</button></div>`; }).join('') || '<p class="note">Nenhuma campanha cadastrada.</p>'}</div>`;
 }
 let campEditando = null;
@@ -653,7 +658,7 @@ function renderRanking() {
   }).join('');
 }
 /* ---------------- Minha comissão (extrato individual) ---------------- */
-const tipoLanc = e => e.tipo === 'bon' ? `Bônus de premiação: ${esc(e.camp)}` : e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : e.cota && e.cota.antecipada ? 'Venda (antecipada pela loja)' : 'Venda');
+const tipoLanc = e => e.tipo === 'bon' ? `Bônus de premiação: ${esc(e.camp)}` : e.camp && e.tipo === 'est' ? `Estorno do bônus (100%): ${esc(e.camp)}` : e.camp && e.tipo === 'rec' ? `Bônus devolvido (cliente recuperado): ${esc(e.camp)}` : e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : e.cota && e.cota.antecipada ? 'Venda (antecipada pela loja)' : 'Venda');
 function renderMinha() {
   if (!ME || !$('mcSexta').value) return;
   if (veComissoes() && !$('mcPessoa').value) return;

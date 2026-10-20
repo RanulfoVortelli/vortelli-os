@@ -192,6 +192,14 @@ function bonusCampanha(c, lista = CAMP) {
 }
 const dataParcela = (c, k) => c.disalEm && c.disalEm[k] ? semanaDisal(c.disalEm[k]) : venc(c, k);
 const soDig = s => String(s || '').replace(/\D/g, '');
+// Valor digitado do jeito brasileiro ou não: 1.488,21 · 1488,21 · 1488.21 · 120.000 · 120000
+const numValor = v => { let s = String(v == null ? '' : v).trim().replace(/[R$\s]/g, ''); if (!s) return 0;
+  const lc = s.lastIndexOf(','), ld = s.lastIndexOf('.');
+  if (lc > -1 && ld > -1) s = lc > ld ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  else if (lc > -1) s = s.replace(/\./g, '').replace(',', '.');
+  else if (ld > -1 && /^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+  return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : NaN; };
+const fmtBR = (n, d = 2) => (n || n === 0) && isFinite(n) ? Number(n).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }) : '';
 const fmtCpf = s => { const d = soDig(s); return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : (s || ''); };
 // Comissões da equipe e extrato de qualquer pessoa: CEO e gerente adm (financeiro)
 const veComissoes = () => GESTOR || (ME && ME.funcao === 'gerente_adm');
@@ -765,7 +773,7 @@ function abrirForm(c) {
     const garante = (sel, id) => { if (id && !$(sel).querySelector(`option[value="${id}"]`)) $(sel).insertAdjacentHTML('beforeend', `<option value="${id}">${esc(nomeP(id))} (inativo)</option>`); };
     garante('fVend', c.vendedor_id); garante('fFech', c.fechador_id); garante('fAdm', c.adm_id);
     $('fCliente').value = c.cliente || ''; $('fCpf').value = fmtCpf(c.cpf); $('fTel').value = c.telefone || '';
-    $('fCredito').value = c.credito || ''; $('fParc').value = c.parcela || ''; $('fData').value = iso(c.venda);
+    $('fCredito').value = c.credito ? fmtBR(c.credito, 0) : ''; $('fParc').value = c.parcela ? fmtBR(c.parcela) : ''; $('fData').value = iso(c.venda);
     $('fVend').value = c.vendedor_id || ''; $('fFech').value = c.fechador_id || c.vendedor_id || '';
     $('fContrato').value = c.contrato || ''; $('fGrupo').value = c.grupo || ''; $('fCotaN').value = c.cotaNum || '';
     $('fVenc').value = c.venc1 || ''; if (c.login) $('fLogin').value = c.login; $('fAdm').value = c.adm_id || '';
@@ -791,7 +799,7 @@ $('btnConfirmarDisal').addEventListener('click', async () => {
   if (error) return toast('Não foi possível confirmar: ' + error.message);
   c.confirmada = true; c.confirmadaEm = TODAY; $('formCota').hidden = true; toast('Venda confirmada na Disal. Comissão liberada.'); renderAll();
 });
-$('fCredito').addEventListener('input', () => { $('fParc').value = ((+$('fCredito').value || 0) * 0.011781).toFixed(2); });
+$('fCredito').addEventListener('input', () => { const v = numValor($('fCredito').value); $('fParc').value = v > 0 ? fmtBR(v * 0.011781) : ''; });
 $('formCota').addEventListener('submit', async ev => {
   ev.preventDefault();
   const vend = pessoaPorId($('fVend').value), id = +$('fId').value || null;
@@ -799,10 +807,12 @@ $('formCota').addEventListener('submit', async ev => {
   if (cpf && cpf.length !== 11) return toast('CPF precisa ter 11 números');
   const contrato = $('fContrato').value.trim() || null;
   if (contrato && COTAS.some(c => c.contrato === contrato && c.id !== id)) return toast('Esse contrato já está cadastrado em outra cota');
-  const parc1 = +$('fParc').value || 0;
+  const cred1 = numValor($('fCredito').value), parc1 = numValor($('fParc').value) || 0;
+  if (!(cred1 >= 10000)) return toast('Confira o crédito: digite assim, 120.000');
+  if (Number.isNaN(parc1) || parc1 < 0) return toast('Confira a 1ª parcela: digite assim, 1.488,21');
   if (parc1 > r('entrada')) return toast(`A 1ª parcela (${brl(parc1, 2)}) está maior que a entrada (${brl(r('entrada'))}). Confira a vírgula: o certo é algo como 1309,62.`);
   const row = {
-    cliente: $('fCliente').value.trim(), cpf: cpf || null, telefone: $('fTel').value.trim() || null, credito: +$('fCredito').value, parcela_valor: +$('fParc').value || null,
+    cliente: $('fCliente').value.trim(), cpf: cpf || null, telefone: $('fTel').value.trim() || null, credito: cred1, parcela_valor: parc1 || null,
     data_venda: $('fData').value, vencimento_1: $('fVenc').value || $('fData').value, contrato, grupo: $('fGrupo').value.trim() || null, cota: $('fCotaN').value.trim() || null,
     login_disal: $('fLogin').value, vendedor_id: vend.id, fechador_id: $('fFech').value, adm_id: $('fAdm').value || null, equipe_id: vend.equipe_id
   };
@@ -1274,7 +1284,7 @@ async function gerarPdfRepr(nome) {
 }
 function cadastrarDoRelatorio(contrato) {
   const g = CF.grupos.find(x => x.contrato === contrato); go('cotas'); abrirForm(null);
-  $('fCliente').value = g.cliente; $('fContrato').value = g.contrato; $('fCredito').value = g.base || '';
+  $('fCliente').value = g.cliente; $('fContrato').value = g.contrato; $('fCredito').value = g.base ? fmtBR(g.base, 0) : '';
   if (g.dataVenda) $('fData').value = g.dataVenda;
   const [grupo, cota] = String(g.cotaTxt || '').split('/'); if (grupo) $('fGrupo').value = String(+grupo || grupo); if (cota) $('fCotaN').value = String(parseInt(cota, 10) || cota);
   toast('Complete vendedor, fechador, CPF e telefone. Depois suba o relatório de novo para confirmar a venda.');

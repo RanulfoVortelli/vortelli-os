@@ -771,7 +771,7 @@ function abrirForm(c) {
   const f = $('formCota'); f.reset(); initFiltros();
   $('fId').value = c ? c.id : '';
   $('fTitulo').textContent = c ? `Editar venda · ${c.cliente}` : 'Cadastrar venda';
-  $('lStatus').hidden = !c; $('btnConfirmarDisal').hidden = !(c && GESTOR && !c.confirmada);
+  $('lStatus').hidden = !c; $('btnConfirmarDisal').hidden = true;   // regra: venda só é confirmada pelo borderô da Disal (Conferência), nunca à mão
   $('fDisalInfo').hidden = !c;
   if (c) {
     const garante = (sel, id) => { if (id && !$(sel).querySelector(`option[value="${id}"]`)) $(sel).insertAdjacentHTML('beforeend', `<option value="${id}">${esc(nomeP(id))} (inativo)</option>`); };

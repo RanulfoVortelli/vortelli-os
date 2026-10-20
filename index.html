@@ -162,6 +162,7 @@
       <label for="qSexta">Sexta de pagamento<select id="qSexta"></select></label>
     </div>
     <div class="kpis" id="kpisCom" style="margin-bottom:16px"></div>
+    <div class="panel" id="campPanel" style="margin-bottom:16px" hidden></div>
     <div class="tbl-wrap"><table><thead><tr><th>Pessoa</th><th>Função</th><th>Equipe</th><th class="r">Cotas</th><th class="r">Comissão</th><th class="r">Estornos</th><th class="r">Descontos</th><th class="r">A pagar</th></tr></thead><tbody id="tbCom"></tbody></table></div>
   </section>
 
@@ -322,6 +323,21 @@
   <div id="cfLeitura" style="margin-top:10px"></div>
   <p id="cfErro" class="neg" style="min-height:18px;margin:8px 0 0;font-size:13px"></p>
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="btn ghost" id="cfCancelar" type="button">Voltar</button><button class="btn" id="cfSalvar" type="button" disabled>Confirmar cancelamento</button></div>
+</dialog>
+<dialog id="dlgCamp" class="dlg" style="max-width:520px">
+  <h2 style="margin:0 0 12px" id="cpTitulo">Nova campanha</h2>
+  <label for="cpNome">Nome da campanha<input id="cpNome" maxlength="120" placeholder="Ex.: Sábado premiado — R$ 100 no Pix"></label>
+  <div class="formgrid" style="margin-top:10px">
+    <label for="cpIni">Vale de<input id="cpIni" type="date"></label>
+    <label for="cpFim">até<input id="cpFim" type="date"></label>
+    <label for="cpVend">Vendedor ganha por cota (R$)<input id="cpVend" type="number" min="0" step="0.01"></label>
+    <label for="cpFech">Fechador ganha por cota (R$)<input id="cpFech" type="number" min="0" step="0.01"></label>
+  </div>
+  <label style="flex-direction:row;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="cpAmbos" style="width:auto"> Quem vende e fecha sozinho recebe os dois valores</label>
+  <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="cpAtiva" style="width:auto"> Campanha ativa (desmarque para parar de pagar)</label>
+  <label for="cpObs" style="margin-top:6px">Observação<input id="cpObs" maxlength="300"></label>
+  <p class="note" id="cpErro" style="min-height:18px"></p>
+  <div class="acts" style="justify-content:flex-end"><button type="button" class="btn ghost" data-camp="fechar">Cancelar</button><button type="button" class="btn gold" data-camp="salvar">Salvar</button></div>
 </dialog>
 <dialog id="dlgDeb" class="dlg" style="max-width:520px">
   <h2 style="margin:0 0 12px">Novo débito</h2>

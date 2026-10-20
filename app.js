@@ -137,6 +137,7 @@ async function carregar(user) {
     await carregarCanc();
     await carregarDebitos();
     await carregarCaixa();
+    await carregarCampanhas();
     $('login').hidden = true; $('app').hidden = false;
     $('quem').textContent = `${ME.nome} · ${funcaoNome(ME)}`;
     document.querySelectorAll('[data-gestor]').forEach(b => b.hidden = !GESTOR);
@@ -175,6 +176,20 @@ const semanaDisal = d => addDays(d, -7);   // sextaPagamento(d - 7) = sexta da s
 const baseVenda = c => c.confirmadaEm && semanaDisal(c.confirmadaEm) > c.venda ? semanaDisal(c.confirmadaEm) : c.venda;
 // Comissão antecipada pela loja: a equipe recebe na sexta da semana da venda, mesmo sem a Disal, e não recebe de novo depois
 const baseEquipe = c => c.antecipada ? c.venda : baseVenda(c);
+// Campanhas de premiação: bônus fixo por cota para vendedor e fechador, pago na mesma sexta da comissão da venda
+let CAMP = [];
+async function carregarCampanhas() {
+  const { data, error } = await sb.from('campanhas').select('*').order('inicio', { ascending: false });
+  if (!error) CAMP = (data || []).map(k => ({ ...k, ini: parseD(k.inicio), fim: parseD(k.fim), vv: Number(k.valor_vendedor) || 0, vf: Number(k.valor_fechador) || 0 }));
+}
+function bonusCampanha(c, lista = CAMP) {
+  const out = [], base = baseEquipe(c), vend = c.vendedor_id || c.fechador_id, fech = c.fechador_id || c.vendedor_id, sozinho = vend === fech;
+  lista.filter(k => k.ativa && c.venda >= k.ini && c.venda <= k.fim).forEach(k => {
+    if (vend && k.vv > 0) out.push({ pessoa: vend, papel: sozinho ? 'Vendedor e fechador' : 'Vendedor', data: base, valor: k.vv, tipo: 'bon', camp: k.nome, cota: c });
+    if (fech && k.vf > 0 && (!sozinho || k.ambos)) out.push({ pessoa: fech, papel: sozinho ? 'Vendedor e fechador' : 'Fechador', data: base, valor: k.vf, tipo: 'bon', camp: k.nome, cota: c });
+  });
+  return out;
+}
 const dataParcela = (c, k) => c.disalEm && c.disalEm[k] ? semanaDisal(c.disalEm[k]) : venc(c, k);
 const soDig = s => String(s || '').replace(/\D/g, '');
 const fmtCpf = s => { const d = soDig(s); return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : (s || ''); };
@@ -250,6 +265,7 @@ function eventosEquipe(c) {
   if (!c.confirmada && !c.antecipada) return ev;   // Política: comissão só depois que a venda sai paga no relatório da Disal (ou antecipada pela loja)
   const { partes } = partesVenda(c);
   partes.forEach(x => ev.push({ pessoa: x.pessoa, papel: x.papel, data: baseEquipe(c), valor: x.valor, tipo: 'com', cota: c }));
+  ev.push(...bonusCampanha(c));
   // Estorno de 50% quando a 2ª não é paga (não vale para estorno por documento)
   if (c.p[2] === 'nao_pago' && !c.estornoDoc) {
     const d = addDays(venc(c, 2), 5), f = r('estorno_equipe') / 100;
@@ -373,14 +389,52 @@ function renderCotas() {
     : `<tr><td colspan="10" class="empty">Nenhuma cota neste filtro.</td></tr>`;
 }
 
+function renderCampanhas() {
+  const el = $('campPanel'); if (!el) return; el.hidden = !veComissoes(); if (el.hidden) return;
+  const cotasDe = k => COTAS.filter(c => valida(c) && c.venda >= k.ini && c.venda <= k.fim);
+  const totalDe = k => cotasDe(k).reduce((s, c) => s + bonusCampanha(c, [k]).filter(e => ativoEm(e.pessoa, e.data)).reduce((a, e) => a + e.valor, 0), 0);
+  el.innerHTML = `<div class="panel-head"><h2>Campanhas de premiação</h2><button class="btn gold sm" type="button" data-camp="nova">+ Nova campanha</button></div>
+    <p class="note" style="margin:4px 0 10px">Bônus fixo por cota vendida no período. Entra no relatório de cada um como "Bônus de premiação", na mesma sexta da comissão da venda. Venda cancelada não paga bônus.</p>
+    <div class="list">${CAMP.map(k => { const n = cotasDe(k).length; return `<div class="row"><div class="l">${esc(k.nome)}<span>${fdate(k.ini)}${+k.fim !== +k.ini ? ' a ' + fdate(k.fim) : ''} · vendedor ${brl(k.vv, 2)} · fechador ${brl(k.vf, 2)}${k.ambos ? '' : ' · quem vende e fecha sozinho recebe só o do vendedor'} · ${n} ${n === 1 ? 'cota' : 'cotas'}${k.ativa ? '' : ' · <b>desativada</b>'}</span></div><b>${brl(k.ativa ? totalDe(k) : 0, 2)}</b> <button class="btn ghost sm" type="button" data-camp="editar:${k.id}">Editar</button></div>`; }).join('') || '<p class="note">Nenhuma campanha cadastrada.</p>'}</div>`;
+}
+let campEditando = null;
+function abrirCamp(k) {
+  campEditando = k || null;
+  $('cpTitulo').textContent = k ? 'Editar campanha' : 'Nova campanha';
+  $('cpNome').value = k ? k.nome : ''; $('cpIni').value = k ? k.inicio : iso(TODAY); $('cpFim').value = k ? k.fim : iso(TODAY);
+  $('cpVend').value = k ? k.vv : 100; $('cpFech').value = k ? k.vf : 100; $('cpAmbos').checked = k ? k.ambos : true; $('cpAtiva').checked = k ? k.ativa : true;
+  $('cpObs').value = k ? (k.obs || '') : ''; $('cpErro').textContent = ''; $('dlgCamp').showModal();
+}
+async function salvarCamp() {
+  const f = { nome: $('cpNome').value.trim(), inicio: $('cpIni').value, fim: $('cpFim').value, valor_vendedor: +$('cpVend').value || 0, valor_fechador: +$('cpFech').value || 0,
+    ambos: $('cpAmbos').checked, ativa: $('cpAtiva').checked, obs: $('cpObs').value.trim() || null };
+  if (!f.nome) return ($('cpErro').textContent = 'Dê um nome à campanha.');
+  if (!f.inicio || !f.fim || f.fim < f.inicio) return ($('cpErro').textContent = 'Confira o período: o fim não pode ser antes do início.');
+  if (f.valor_vendedor < 0 || f.valor_fechador < 0 || !(f.valor_vendedor + f.valor_fechador > 0)) return ($('cpErro').textContent = 'Informe quanto ganha o vendedor e/ou o fechador.');
+  $('cpErro').textContent = 'Salvando…';
+  const q = campEditando ? sb.from('campanhas').update(f).eq('id', campEditando.id) : sb.from('campanhas').insert(f);
+  const { error } = await q;
+  if (error) return ($('cpErro').textContent = 'Não foi possível salvar: ' + error.message);
+  $('dlgCamp').close(); await carregarCampanhas(); renderAll(); toast(campEditando ? 'Campanha atualizada' : 'Campanha criada');
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-camp]'); if (!b) return;
+  const [acao, id] = b.dataset.camp.split(':');
+  if (acao === 'nova') abrirCamp(null);
+  else if (acao === 'editar') abrirCamp(CAMP.find(k => String(k.id) === id));
+  else if (acao === 'salvar') salvarCamp();
+  else if (acao === 'fechar') $('dlgCamp').close();
+});
+
 function renderComissoes() {
   const sexta = new Date(+$('qSexta').value);
   const ev = todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +sexta && (veComissoes() || e.pessoa === ME.id || (ME.funcao === 'gerente')));
   const map = {};
-  ev.forEach(e => { const m = map[e.pessoa] ||= { id: e.pessoa, cotas: new Set(), com: 0, est: 0, desc: 0 }; if (e.tipo === 'com' || e.tipo === 'rec') { m.com += e.valor; if (e.tipo === 'com') m.cotas.add(e.cota.id); } else if (e.tipo === 'desc') m.desc += e.valor; else m.est += e.valor; });
+  ev.forEach(e => { const m = map[e.pessoa] ||= { id: e.pessoa, cotas: new Set(), com: 0, est: 0, desc: 0 }; if (e.tipo === 'com' || e.tipo === 'rec' || e.tipo === 'bon') { m.com += e.valor; if (e.tipo === 'com') m.cotas.add(e.cota.id); } else if (e.tipo === 'desc') m.desc += e.valor; else m.est += e.valor; });
   const tot = x => x.com + x.est + x.desc;
   const lista = Object.values(map).sort((a, b) => tot(b) - tot(a));
   const tc = lista.reduce((s, x) => s + x.com, 0), te = lista.reduce((s, x) => s + x.est, 0), td = lista.reduce((s, x) => s + x.desc, 0);
+  renderCampanhas();
   const pagar = lista.reduce((s, x) => s + Math.max(0, tot(x)), 0), passa = lista.reduce((s, x) => s + Math.min(0, tot(x)), 0);
   $('kpisCom').innerHTML = kpi('Comissões', brl(tc)) + kpi('Estornos', `<span class="neg">${brl(te)}</span>`) + kpi('Descontos', `<span class="neg">${brl(td)}</span>`, 'Tráfego, débitos e saldo anterior') + kpi('Total a pagar', brl(pagar), passa ? `${lista.filter(x => tot(x) < 0).length} com saldo negativo: ${brl(passa)} passa para a próxima sexta` : 'Ninguém negativo') + kpi('Pessoas', lista.length);
   $('tbCom').innerHTML = lista.length ? lista.map(x => { const p = pessoaPorId(x.id) || {}; return `<tr><td>${esc(p.nome)}</td><td>${funcaoNome(p)}</td><td>${esc(equipeNome(p.equipe_id))}</td><td class="r n">${x.cotas.size}</td><td class="r n">${brl(x.com, 2)}</td><td class="r n ${x.est ? 'neg' : ''}">${x.est ? brl(x.est, 2) : '—'}</td><td class="r n ${x.desc ? 'neg' : ''}">${x.desc ? brl(x.desc, 2) : '—'}</td><td class="r n ${tot(x) < 0 ? 'neg' : ''}"><strong>${brl(tot(x), 2)}</strong>${tot(x) < 0 ? '<br><span class="note">não recebe; passa para a próxima sexta</span>' : ''}</td></tr>`; }).join('') +
@@ -599,7 +653,7 @@ function renderRanking() {
   }).join('');
 }
 /* ---------------- Minha comissão (extrato individual) ---------------- */
-const tipoLanc = e => e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : e.cota && e.cota.antecipada ? 'Venda (antecipada pela loja)' : 'Venda');
+const tipoLanc = e => e.tipo === 'bon' ? `Bônus de premiação: ${esc(e.camp)}` : e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? 'Estorno (2ª não paga)' : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : e.cota && e.cota.antecipada ? 'Venda (antecipada pela loja)' : 'Venda');
 function renderMinha() {
   if (!ME || !$('mcSexta').value) return;
   if (veComissoes() && !$('mcPessoa').value) return;

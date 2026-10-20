@@ -263,9 +263,9 @@ function eventosEquipe(c) {
     if (!(c.confirmada || c.antecipada) || !(c.credito > 0)) return [];
     const base = baseEquipe(c), conf = c.canc.conf;
     if (+sextaPagamento(base) > +sextaPagamento(conf)) return [];   // ainda não tinha sido paga: não paga
-    const f = (c.canc.pct || 50) / 100, ev = [];
+    const f = Math.max(0, (c.canc.pct || 50) - (c.canc.ja || 0)) / 100, ev = [];   // desconta só o que ainda não foi descontado fora do sistema
     partesVenda(c).partes.forEach(x => { ev.push({ pessoa: x.pessoa, papel: x.papel, data: base, valor: x.valor, tipo: 'com', cota: c });
-      ev.push({ pessoa: x.pessoa, papel: x.papel, data: conf, valor: -x.valor * f, tipo: 'est', cota: c, pctc: c.canc.pct || 50 }); });
+      ev.push({ pessoa: x.pessoa, papel: x.papel, data: conf, valor: -x.valor * f, tipo: 'est', cota: c, pctc: c.canc.pct || 50, pja: c.canc.ja || 0 }); });
     bonusCampanha(c).forEach(b => { ev.push(b); ev.push({ ...b, data: conf, valor: -b.valor, tipo: 'est' }); });   // bônus de campanha: estorno de 100%
     return ev.filter(e => ativoEm(e.pessoa, e.data));
   }
@@ -666,7 +666,7 @@ function renderRanking() {
   }).join('');
 }
 /* ---------------- Minha comissão (extrato individual) ---------------- */
-const tipoLanc = e => e.tipo === 'bon' ? `Bônus de premiação: ${esc(e.camp)}` : e.camp && e.tipo === 'est' ? `Estorno do bônus (100%): ${esc(e.camp)}` : e.camp && e.tipo === 'rec' ? `Bônus devolvido (cliente recuperado): ${esc(e.camp)}` : e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? (e.pctc ? `Estorno por cancelamento (${e.pctc}%)` : 'Estorno (2ª não paga)') : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : e.cota && e.cota.antecipada ? 'Venda (antecipada pela loja)' : 'Venda');
+const tipoLanc = e => e.tipo === 'bon' ? `Bônus de premiação: ${esc(e.camp)}` : e.camp && e.tipo === 'est' ? `Estorno do bônus (100%): ${esc(e.camp)}` : e.camp && e.tipo === 'rec' ? `Bônus devolvido (cliente recuperado): ${esc(e.camp)}` : e.tipo === 'desc' ? (e.papel === 'Tráfego pago' ? 'Desconto: tráfego pago' : e.papel === 'Saldo anterior' ? 'Saldo anterior (negativo)' : e.papel === 'Débito' ? 'Desconto: débito' : 'Desconto') : e.tipo === 'est' ? (e.pctc ? `Estorno por cancelamento (${e.pctc}%${e.pja ? `; ${e.pja}% já descontado no relatório interno` : ''})` : 'Estorno (2ª não paga)') : e.tipo === 'rec' ? 'Recuperação' : (['Administrativo', 'Gerente adm', 'Supervisor (carteira)'].includes(e.papel) ? 'Parcela paga (3ª a 5ª)' : e.papel === 'Gerente geral' ? 'Bônus do mês' : e.cota && e.cota.antecipada ? 'Venda (antecipada pela loja)' : 'Venda');
 function renderMinha() {
   if (!ME || !$('mcSexta').value) return;
   if (veComissoes() && !$('mcPessoa').value) return;
@@ -1763,7 +1763,7 @@ async function carregarCanc() {
   const { data } = await sb.from('cancelamentos').select('*');
   (data || []).forEach(k => { const c = COTAS.find(x => x.id === k.cota_id); if (c) c.canc = {
     motivo: k.motivo, detalhe: k.detalhe, pedido: parseD(k.pedido_em), arq: k.contrato_arq, por: k.registrado_por,
-    conf: parseD(k.confirmado_em), pct: k.pct_devolucao, ext: k.extrato_arq, info: k.extrato_info, doc: k.contrato_conf, hist: k.contrato_hist || [] }; });
+    conf: parseD(k.confirmado_em), pct: k.pct_devolucao, ja: k.ja_descontado_pct || 0, ext: k.extrato_arq, info: k.extrato_info, doc: k.contrato_conf, hist: k.contrato_hist || [] }; });
 }
 const podeEditarCanc = c => !!(c.canc && ME && (GESTOR || ME.funcao === 'gerente_adm' || c.canc.por === ME.id));
 const podeDesfazerConf = () => !!(ME && (GESTOR || ME.funcao === 'gerente_adm'));

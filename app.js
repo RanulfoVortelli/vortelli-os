@@ -416,17 +416,14 @@ function movimentoCaixa(de) {   // do dia seguinte ao saldo informado até hoje
   const lanc = LANC.filter(l => dentro(l.data)).reduce((s, l) => s + (l.tipo === 'saida' ? -l.valor : l.valor), 0);
   return { entrada, disal: disal - imp, equipe: -equipe, folha: -folha, lanc };
 }
-function renderCaixa() {
+function renderCaixa() {   // caixa do mês: começa zerado no dia 1º, sem saldo de meses anteriores
   const el = $('caixaPanel'); if (!el || !GESTOR) return;
-  const ult = CAIXA[0];
-  const form = `<form id="formCaixa" class="formgrid" style="margin-top:12px"><label for="cxData">Data do saldo<input id="cxData" type="date" required value="${iso(TODAY)}"></label><label for="cxValor">Saldo no banco (R$)<input id="cxValor" type="number" step="0.01" required placeholder="0,00"></label><label for="cxObs">Observação<input id="cxObs" placeholder="Ex.: soma das contas da loja"></label><div style="align-self:end"><button class="btn gold" type="submit">Registrar saldo</button></div></form>`;
-  if (!ult) { el.innerHTML = `<div class="panel-head"><h2>Caixa da loja</h2></div><p class="note">O sistema ainda não sabe quanto tem no banco. Informe o saldo real de hoje (somando as contas da loja). A partir dele, o caixa passa a ser atualizado com as entradas das vendas, a Disal, as comissões pagas, os salários e os lançamentos abaixo.</p>${form}`; return; }
-  const m = movimentoCaixa(ult.data), mov = m.entrada + m.disal + m.equipe + m.folha + m.lanc, est = ult.valor + mov;
-  const linhas = [['Sobra das entradas', m.entrada], ['Comissão Disal (líquida de imposto)', m.disal], ['Comissões pagas à equipe (sextas)', m.equipe], ['Salários', m.folha], ['Lançamentos do Financeiro', m.lanc]];
-  el.innerHTML = `<div class="panel-head"><h2>Caixa da loja</h2><span class="sub">estimado a partir do último saldo do banco</span></div>
-    <div class="kpis" style="margin:8px 0 12px">${kpi('Saldo informado', brl(ult.valor, 2), `fim do dia ${fdate(ult.data)}${ult.obs ? ' · ' + esc(ult.obs) : ''}`)}${kpi('Movimento desde então', `<span class="${mov < 0 ? 'neg' : ''}">${brl(mov, 2)}</span>`, 'pelo que está no sistema')}${kpi('Caixa estimado hoje', `<span class="${est < 0 ? 'neg' : ''}">${brl(est, 2)}</span>`, 'confira com o banco de vez em quando')}</div>
-    <div class="list">${linhas.map(([t, v]) => `<div class="row"><div class="l">${t}</div><b class="${v < 0 ? 'neg' : ''}">${brl(v, 2)}</b></div>`).join('')}</div>
-    <details style="margin-top:10px"><summary class="note" style="cursor:pointer">Informar novo saldo do banco · histórico</summary>${form}<div class="list" style="margin-top:10px">${CAIXA.map(x => `<div class="row"><div class="l">${fdate(x.data)}<span>${esc(x.obs || '')}${x.obs ? ' · ' : ''}${esc(nomeP(x.criado_por))}</span></div><b>${brl(x.valor, 2)}</b> <button class="btn ghost sm" type="button" data-cxdel="${x.id}">Excluir</button></div>`).join('')}</div></details>`;
+  const ini = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
+  const m = movimentoCaixa(addDays(ini, -1)), est = m.entrada + m.disal + m.equipe + m.folha + m.lanc;
+  const linhas = [['Sobra das entradas', m.entrada, 'Entrada de R$ ' + r('entrada').toLocaleString('pt-BR') + ' − 1ª parcela, nas vendas do mês'], ['Comissão Disal', m.disal, 'Já confirmada, líquida de imposto'], ['Comissões pagas à equipe', m.equipe, 'Pagamentos das sextas deste mês'], ['Salários', m.folha, 'Dias ' + diasFolha().join(' e ') + ' que já passaram'], ['Lançamentos do Financeiro', m.lanc, 'Despesas e entradas lançadas abaixo']];
+  el.innerHTML = `<div class="panel-head"><h2>Caixa do mês</h2><span class="sub">começa zerado em ${fdate(ini)} · sem saldo de meses anteriores</span></div>
+    <div class="kpis" style="margin:8px 0 12px">${kpi('Caixa do mês até hoje', `<span class="${est < 0 ? 'neg' : ''}">${brl(est, 2)}</span>`, 'o que entrou menos o que saiu desde o dia 1º')}</div>
+    <div class="list">${linhas.map(([t, v, d]) => `<div class="row"><div class="l">${t}<span>${d}</span></div><b class="${v < 0 ? 'neg' : ''}">${brl(v, 2)}</b></div>`).join('')}</div>`;
 }
 document.addEventListener('submit', async ev => {
   if (ev.target.id !== 'formCaixa') return; ev.preventDefault();

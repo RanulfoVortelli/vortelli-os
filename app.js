@@ -305,11 +305,13 @@ function eventosEquipe(c) {
   }
   return ev.filter(e => ativoEm(e.pessoa, e.data));
 }
-// Gerente geral: R$ 50 por cota se a loja vender no mínimo 80 no mês; apurado 7 dias após o fim do mês
+// Gerente geral: R$ 50 por cota se a loja vender no mínimo 80 no mês; apurado 7 dias após o fim do mês (prazo de cancelamento).
+// Só contam vendas do mês que vieram no borderô da Disal até a data da apuração e não foram canceladas (regra de 20/10/2026).
 function bonusGerenteGeral() {
   const gg = PESSOAS.find(p => p.gerente_geral && p.ativo); if (!gg) return [];
   const porMes = {};
-  COTAS.forEach(c => { if (valida(c)) porMes[ymOf(c.venda)] = (porMes[ymOf(c.venda)] || 0) + 1; });
+  const apuracao = ym => addDays(new Date(Math.floor(ym / 12), ym % 12 + 1, 0), 7);
+  COTAS.forEach(c => { const ym = ymOf(c.venda); if (valida(c) && c.confirmada && c.confirmadaEm && c.confirmadaEm <= apuracao(ym)) porMes[ym] = (porMes[ym] || 0) + 1; });
   return Object.entries(porMes).filter(([, n]) => n >= r('gg_min_cotas')).map(([ym, n]) => {
     ym = +ym; const fim = new Date(Math.floor(ym / 12), ym % 12 + 1, 0);
     return { pessoa: gg.id, papel: 'Gerente geral', data: addDays(fim, 7), valor: n * r('gg_por_cota'), tipo: 'com', cota: { id: 'gg' + ym } };

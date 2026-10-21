@@ -291,26 +291,64 @@ function celebrar(c) {
   $('pN').textContent = p.nome; $('pT').textContent = e ? `Equipe ${e.nome}` : '';
   $('pV').textContent = brl(Number(c.credito));
   $('pR').textContent = `${meus}ª cota no mês${pos ? ` · ${pos}º lugar no ranking` : ''}`;
-  $('party').style.setProperty('--tc', corEq(e)); $('party').classList.add('on'); confete(corEq(e)); abaixarMusica(7600); som();
-  setTimeout(() => { $('party').classList.remove('on'); setTimeout(proxima, 900); }, 7000);
+  $('party').style.setProperty('--tc', corEq(e)); $('party').classList.add('on'); confete(corEq(e)); abaixarMusica(DUR_FESTA + 600); som();
+  setTimeout(() => { $('party').classList.remove('on'); setTimeout(proxima, 900); }, DUR_FESTA);
 }
 function proxima() { const c = fila.shift(); if (c) { mostrando = true; celebrar(c); } else mostrando = false; }
+// Fogos + confete: dura a comemoração inteira
+const DUR_FESTA = 15000;
 function confete(cor) {
   const cv = $('cf'), ctx = cv.getContext('2d'); cv.width = innerWidth; cv.height = innerHeight;
-  const cores = [cor, '#E2B65C', '#F6D58C', '#FFFFFF', '#4CC38A', '#5DB3E8'];
-  const ps = Array.from({ length: 260 }, () => ({ x: Math.random() * cv.width, y: -20 - Math.random() * cv.height * .6, w: 6 + Math.random() * 8, h: 10 + Math.random() * 10, vy: 2 + Math.random() * 4, vx: -2 + Math.random() * 4, r: Math.random() * 6, vr: -.2 + Math.random() * .4, c: cores[Math.floor(Math.random() * cores.length)] }));
-  const t0 = performance.now();
+  const cores = [cor, '#E2B65C', '#F6D58C', '#FFFFFF', '#4CC38A', '#5DB3E8', '#FF6B5B'];
+  const pick = () => cores[Math.floor(Math.random() * cores.length)];
+  const novo = () => ({ x: Math.random() * cv.width, y: -20 - Math.random() * cv.height * .3, w: 6 + Math.random() * 8, h: 10 + Math.random() * 10, vy: 2 + Math.random() * 4, vx: -2 + Math.random() * 4, r: Math.random() * 6, vr: -.2 + Math.random() * .4, c: pick() });
+  const ps = Array.from({ length: 220 }, novo), fogos = [], faiscas = [];
+  const lancar = () => fogos.push({ x: cv.width * (.12 + Math.random() * .76), y: cv.height, vy: -(cv.height * .014 + Math.random() * cv.height * .006), alvo: cv.height * (.12 + Math.random() * .3), c: pick() });
+  const explodir = f => { const n = 80 + Math.floor(Math.random() * 50); for (let i = 0; i < n; i++) { const a = Math.PI * 2 * i / n, v = 2 + Math.random() * 5; faiscas.push({ x: f.x, y: f.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, vida: 1, c: Math.random() < .3 ? '#FFFFFF' : f.c }); } estouro(); };
+  const t0 = performance.now(); let ult = 0;
   (function f(t) {
-    ctx.clearRect(0, 0, cv.width, cv.height);
-    ps.forEach(q => { q.x += q.vx; q.y += q.vy; q.r += q.vr; ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.r); ctx.fillStyle = q.c; ctx.fillRect(-q.w / 2, -q.h / 2, q.w, q.h); ctx.restore(); });
-    if (t - t0 < 6500) requestAnimationFrame(f); else ctx.clearRect(0, 0, cv.width, cv.height);
+    const dt = t - t0;
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.clearRect(0, 0, cv.width, cv.height);
+    if (dt < DUR_FESTA - 2500 && t - ult > 380 + Math.random() * 520) { lancar(); if (Math.random() < .35) lancar(); ult = t; }
+    if (dt < DUR_FESTA - 3500 && Math.random() < .6) ps.push(novo());
+    ps.forEach(q => { q.x += q.vx; q.y += q.vy; q.r += q.vr; if (q.y > cv.height + 30) return; ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.r); ctx.fillStyle = q.c; ctx.fillRect(-q.w / 2, -q.h / 2, q.w, q.h); ctx.restore(); });
+    for (let i = fogos.length - 1; i >= 0; i--) { const q = fogos[i]; q.y += q.vy; q.vy *= .985; ctx.fillStyle = '#FFF4D6'; ctx.beginPath(); ctx.arc(q.x, q.y, 3.2, 0, 7); ctx.fill(); if (q.y <= q.alvo || q.vy > -1.5) { explodir(q); fogos.splice(i, 1); } }
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = faiscas.length - 1; i >= 0; i--) { const z = faiscas[i]; z.x += z.vx; z.y += z.vy; z.vy += .05; z.vx *= .985; z.vy *= .985; z.vida -= .011; if (z.vida <= 0) { faiscas.splice(i, 1); continue; } ctx.globalAlpha = z.vida; ctx.fillStyle = z.c; ctx.beginPath(); ctx.arc(z.x, z.y, 2.6, 0, 7); ctx.fill(); }
+    if (dt < DUR_FESTA || faiscas.length) requestAnimationFrame(f); else { ctx.globalAlpha = 1; ctx.clearRect(0, 0, cv.width, cv.height); }
   })(t0);
 }
+// Som: fanfarra de vitória (composição própria), tambores, estouros dos fogos e aplausos
 let audio;
+const ac = () => { audio ||= new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === 'suspended') audio.resume(); return audio; };
+function nota(f, ini, dur, vol = .12) {
+  const a = ac(), t = a.currentTime + ini, fl = a.createBiquadFilter(), g = a.createGain();
+  fl.type = 'lowpass'; fl.frequency.setValueAtTime(800, t); fl.frequency.linearRampToValueAtTime(2800, t + .08);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + .03); g.gain.setValueAtTime(vol * .85, t + dur * .7); g.gain.exponentialRampToValueAtTime(.001, t + dur);
+  [1, 1.004, .996].forEach(m => { const o = a.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f * m; o.connect(fl); o.start(t); o.stop(t + dur + .05); });
+  fl.connect(g).connect(a.destination);
+}
+function tambor(ini, vol = .55) { const a = ac(), t = a.currentTime + ini, o = a.createOscillator(), g = a.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(48, t + .35); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.001, t + .45); o.connect(g).connect(a.destination); o.start(t); o.stop(t + .5); }
+function ruido(ini, dur, vol, freq, q = .8) {
+  const a = ac(), t = a.currentTime + ini, n = Math.max(1, Math.floor(a.sampleRate * dur)), b = a.createBuffer(1, n, a.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);
+  const src = a.createBufferSource(), fl = a.createBiquadFilter(), g = a.createGain(); src.buffer = b; fl.type = 'bandpass'; fl.frequency.value = freq; fl.Q.value = q; g.gain.value = vol;
+  src.connect(fl).connect(g).connect(a.destination); src.start(t);
+}
+function aplausos(ini, dur) { for (let k = 0; k < dur * 55; k++) { const x = Math.random(); ruido(ini + x * dur, .04 + Math.random() * .05, (.04 + Math.random() * .07) * Math.min(1, 1.6 - x), 1100 + Math.random() * 2600, 1.2); } }
+function estouro() { try { ruido(0, .7, .28, 260); ruido(.04, 1.1, .08, 3200); } catch (e) {} }
 function som() {
   try {
-    audio ||= new (window.AudioContext || window.webkitAudioContext)();
-    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => { const o = audio.createOscillator(), g = audio.createGain(); o.type = 'triangle'; o.frequency.value = f; g.gain.setValueAtTime(0, audio.currentTime + i * .12); g.gain.linearRampToValueAtTime(.18, audio.currentTime + i * .12 + .02); g.gain.exponentialRampToValueAtTime(.001, audio.currentTime + i * .12 + .5); o.connect(g).connect(audio.destination); o.start(audio.currentTime + i * .12); o.stop(audio.currentTime + i * .12 + .6); });
+    const S = .17;   // um tempo
+    // Chamada de trompete, resposta e final em Dó maior
+    [[392, 0, 1], [523.25, 1, 1], [659.25, 2, 1], [783.99, 3, 3], [659.25, 6, 1], [783.99, 7, 4],
+     [440, 12, 1], [587.33, 13, 1], [698.46, 14, 1], [880, 15, 3], [698.46, 18, 1], [880, 19, 3],
+     [783.99, 23, 1], [987.77, 24, 1], [1046.5, 25, 9]].forEach(([f, i, d]) => nota(f, i * S, d * S));
+    [261.63, 329.63, 392, 523.25].forEach(f => nota(f, 25 * S, 10 * S, .07));
+    [0, 3, 6, 12, 15, 18].forEach(i => tambor(i * S));
+    for (let k = 0; k < 10; k++) tambor((21 + k * .4) * S, .25 + k * .03);
+    tambor(25 * S, .8);
+    aplausos(25 * S, 8);
   } catch (e) {}
 }
 
@@ -416,7 +454,7 @@ async function iniciar() {
   $('msg').hidden = true; $('tv').hidden = false;
   relogio(); setInterval(relogio, 10000);
   await atualizar();
-  setInterval(atualizar, 30000);              // vendas: a cada 30 segundos
+  setInterval(atualizar, 8000);               // vendas: a cada 8 segundos
   setInterval(() => base().then(render).catch(() => {}), 10 * 60000);   // equipe e metas: a cada 10 minutos
   addEventListener('resize', render);
 }

@@ -453,13 +453,61 @@ function renderComissoes() {
   const tot = x => x.com + x.est + x.desc;
   const lista = Object.values(map).sort((a, b) => tot(b) - tot(a));
   const tc = lista.reduce((s, x) => s + x.com, 0), te = lista.reduce((s, x) => s + x.est, 0), td = lista.reduce((s, x) => s + x.desc, 0);
-  renderCampanhas();
+  renderCampanhas(); $('btnPdfCom').hidden = !veComissoes();
   const pagar = lista.reduce((s, x) => s + Math.max(0, tot(x)), 0), passa = lista.reduce((s, x) => s + Math.min(0, tot(x)), 0);
   $('kpisCom').innerHTML = kpi('Comissões', brl(tc)) + kpi('Estornos', `<span class="neg">${brl(te)}</span>`) + kpi('Descontos', `<span class="neg">${brl(td)}</span>`, 'Tráfego, débitos e saldo anterior') + kpi('Total a pagar', brl(pagar), passa ? `${lista.filter(x => tot(x) < 0).length} com saldo negativo: ${brl(passa)} passa para a próxima sexta` : 'Ninguém negativo') + kpi('Pessoas', lista.length);
   $('tbCom').innerHTML = lista.length ? lista.map(x => { const p = pessoaPorId(x.id) || {}; return `<tr><td>${esc(p.nome)}</td><td>${funcaoNome(p)}</td><td>${esc(equipeNome(p.equipe_id))}</td><td class="r n">${x.cotas.size}</td><td class="r n">${brl(x.com, 2)}</td><td class="r n ${x.est ? 'neg' : ''}">${x.est ? brl(x.est, 2) : '—'}</td><td class="r n ${x.desc ? 'neg' : ''}">${x.desc ? brl(x.desc, 2) : '—'}</td><td class="r n ${tot(x) < 0 ? 'neg' : ''}"><strong>${brl(tot(x), 2)}</strong>${tot(x) < 0 ? '<br><span class="note">não recebe; passa para a próxima sexta</span>' : ''}</td></tr>`; }).join('') +
     `<tr class="total"><td colspan="4">Total</td><td class="r n">${brl(tc, 2)}</td><td class="r n neg">${brl(te, 2)}</td><td class="r n neg">${brl(td, 2)}</td><td class="r n">${brl(tc + te + td, 2)}</td></tr>`
     : `<tr><td colspan="8" class="empty">Nada a pagar nesta sexta.</td></tr>`;
 }
+
+// PDF geral da sexta: resumo de todos + uma página por pessoa com cada lançamento
+async function gerarPdfComissoes() {
+  try { await carregarScript(LIB_PDF, 'jspdf'); await carregarScript(LIB_PDFT); } catch (e) { return toast('Erro: ' + e.message); }
+  const sexta = new Date(+$('qSexta').value);
+  const ev = todosEventosEquipe().filter(e => +sextaPagamento(e.data) === +sexta);
+  const map = {};
+  ev.forEach(e => { const m = map[e.pessoa] ||= { id: e.pessoa, cotas: new Set(), com: 0, est: 0, desc: 0, ev: [] }; m.ev.push(e);
+    if (e.tipo === 'com' || e.tipo === 'rec' || e.tipo === 'bon') { m.com += e.valor; if (e.tipo === 'com') m.cotas.add(e.cota.id); } else if (e.tipo === 'desc') m.desc += e.valor; else m.est += e.valor; });
+  const tot = x => x.com + x.est + x.desc;
+  const nome = x => (pessoaPorId(x.id) || {}).nome || '-';
+  const lista = Object.values(map).sort((a, b) => nome(a).localeCompare(nome(b)));
+  if (!lista.length) return toast('Nada a pagar nesta sexta.');
+  const un = s => String(s).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  const t = s => un(s == null || s === '' ? '-' : s).replace(/—/g, '-').replace(/ /g, ' ');
+  const tc = lista.reduce((s, x) => s + x.com, 0), te = lista.reduce((s, x) => s + x.est, 0), td = lista.reduce((s, x) => s + x.desc, 0);
+  const pagar = lista.reduce((s, x) => s + Math.max(0, tot(x)), 0), passa = lista.reduce((s, x) => s + Math.min(0, tot(x)), 0);
+  const ds = sexta.toLocaleDateString('pt-BR');
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const topo = (tit, sub) => { doc.setFillColor(15, 37, 71); doc.rect(0, 0, 210, 26, 'F'); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text(t(tit), 14, 12); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(t(sub), 14, 20); doc.setTextColor(13, 26, 48); };
+  const H = { fillColor: [15, 37, 71] }, neg = d => { if (d.section === 'body' && /^-|^−/.test(String(d.cell.raw || ''))) d.cell.styles.textColor = [176, 42, 32]; };
+  topo(`Comissões - sexta ${ds}`, `Resumo geral | ${lista.length} pessoas`);
+  doc.autoTable({ startY: 31, head: [['Comissões', 'Estornos', 'Descontos', 'Total a pagar', 'Passa p/ próxima sexta']],
+    body: [[t(brl(tc, 2)), t(brl(te, 2)), t(brl(td, 2)), t(brl(pagar, 2)), t(brl(passa, 2))]], styles: { fontSize: 9, halign: 'center' }, headStyles: { ...H, halign: 'center' }, didParseCell: neg });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY + 6, head: [['Pessoa', 'Função', 'Equipe', 'Cotas', 'Comissão', 'Estornos', 'Descontos', 'A pagar']],
+    body: lista.map(x => { const p = pessoaPorId(x.id) || {}; return [t(p.nome), t(funcaoNome(p)), t(equipeNome(p.equipe_id)), String(x.cotas.size), t(brl(x.com, 2)), x.est ? t(brl(x.est, 2)) : '-', x.desc ? t(brl(x.desc, 2)) : '-', t(brl(tot(x), 2)) + (tot(x) < 0 ? '\n(não recebe)' : '')]; }),
+    foot: [['Total', '', '', '', t(brl(tc, 2)), t(brl(te, 2)), t(brl(td, 2)), t(brl(tc + te + td, 2))]],
+    styles: { fontSize: 8, cellPadding: 1.5 }, headStyles: H, footStyles: { fillColor: [232, 236, 244], textColor: [13, 26, 48], fontStyle: 'bold' },
+    columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right', fontStyle: 'bold' } }, didParseCell: neg });
+  lista.forEach(x => {
+    const p = pessoaPorId(x.id) || {}; doc.addPage();
+    topo(p.nome || '-', `${funcaoNome(p)} | ${equipeNome(p.equipe_id) || '-'} | sexta ${ds}`);
+    doc.autoTable({ startY: 31, head: [['Comissões', 'Estornos', 'Descontos', 'Total da sexta']],
+      body: [[t(brl(x.com, 2)), t(brl(x.est, 2)), t(brl(x.desc, 2)), t(brl(tot(x), 2))]], styles: { fontSize: 9, halign: 'center' }, headStyles: { ...H, halign: 'center' }, didParseCell: neg });
+    const L = x.ev.slice().sort((a, b) => (a.tipo === 'desc') - (b.tipo === 'desc') || a.data - b.data);
+    doc.autoTable({ startY: doc.lastAutoTable.finalY + 6, head: [['Data', 'Cliente / descrição', 'Contrato', 'Papel', 'Lançamento', 'Crédito', 'Valor']],
+      body: L.map(e => { const c = e.cota || {}, gg = String(c.id || '').startsWith('gg');
+        return [e.data.toLocaleDateString('pt-BR'), t((gg ? 'Loja: meta de cotas do mês' : (c.cliente || '-')) + (c.obs ? '\n' + c.obs : '')), t(c.contrato), t(e.papel), t(tipoLanc(e)), c.credito ? t(brl(c.credito)) : '-', t(brl(e.valor, 2))]; }),
+      foot: [['', 'Total da sexta', '', '', '', '', t(brl(tot(x), 2))]],
+      styles: { fontSize: 7.5, cellPadding: 1.4 }, headStyles: H, footStyles: { fillColor: [232, 236, 244], textColor: [13, 26, 48], fontStyle: 'bold' },
+      columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 52 }, 5: { halign: 'right' }, 6: { halign: 'right', fontStyle: 'bold', cellWidth: 22 } }, didParseCell: neg });
+    if (tot(x) < 0) { doc.setFontSize(9); doc.setTextColor(176, 42, 32); doc.text(t(`Saldo negativo de ${brl(tot(x), 2)}: não recebe nesta sexta; o valor passa para a próxima.`), 14, doc.lastAutoTable.finalY + 7); doc.setTextColor(13, 26, 48); }
+  });
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(90, 105, 132); doc.text(t(`Gerado em ${new Date().toLocaleString('pt-BR')} pelo Vortelli OS | página ${i} de ${n}`), 14, 290); }
+  doc.save(`Comissoes_sexta_${iso(sexta)}.pdf`);
+}
+$('btnPdfCom').addEventListener('click', gerarPdfComissoes);
 
 function renderAlertas() {
   const L = alertasLista();
